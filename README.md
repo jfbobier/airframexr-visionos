@@ -43,12 +43,9 @@ Everything below is in the `airframexr-client` branch on top of upstream `main`.
 
 **Hands and controllers**
 
-- Hands as controllers (on by default): your hands appear to the game as controllers, a pinch is that hand's
-  trigger. The click is visionOS's own pinch gesture, the one the whole system uses, not a thumb-to-index
-  distance from the hand skeleton (that missed real pinches and clicked when a hand was turned over). Two pinches
-  in a row on the same hand (the second within 0.9 s of a short first one) also send that hand's A or X button,
-  which the AirFrameXR desktop mirror reads as a double click, like a Quest's real button. Off sends the hand
-  skeleton only.
+- No hand input: your hands never reach the game (no pinch click, no hand controller pose, no hand skeleton).
+  Input comes from PlayStation VR2 Sense controllers, a Steam Controller or a gamepad (DualSense, Xbox, Joy-Con).
+  Removed in 1.3.1 because the pinch kept sending commands nobody gave.
 - PlayStation VR2 Sense controllers: tested in game. The small Create (left) and Options (right) buttons reach the
   game as that hand's menu button, kept distinct because games bind them to different things. The PS button is
   not available to any app: visionOS 27 does not expose it in the controller's input profile, so the Home Button
@@ -58,7 +55,7 @@ Everything below is in the `airframexr-client` branch on top of upstream `main`.
 
 **Window**
 
-- One column: connection status, floor rows, four switches (Hands as controllers, Proximity chaperone,
+- One column: connection status, floor rows, three switches (Proximity chaperone,
   Performance HUD on the left forearm, Auto-connect) and Enter. No settings that duplicate the PC's.
 - Auto-connect enters the stream as soon as the streamer connects.
 - App name and icon: AirFrameXR.
@@ -83,6 +80,11 @@ workflow files show the exact commands (Rust client core, cbindgen, `repack_alvr
 Stream transitions: the app going unstable, or closing itself, when the stream starts, when a game stalls or loads, or when the frame
 rate drops. Found with a new protocol harness (`tools/protocol-harness/`, below) that runs the app's own `EventHandler.swift` on Linux
 against a scripted streamer, plus ThreadSanitizer. Built by CI only; not tested on a headset.
+
+- All hand input is removed: the system pinch gesture (and the double pinch that sent A / X), hands as controllers, the hand skeleton, the
+  "Hands as controllers" switch and the controllers-clack toggle. Users reported random commands from the pinch. ARKit hand tracking
+  still runs, only to fuse the Steam Controller pose from the hands holding it. Without a controller, a Steam Controller or a gamepad the
+  app now sends no input at all (so the desktop mirror cannot be clicked either). Settings saved by earlier builds are ignored.
 
 - A game that sends nothing for 30 s (a long loading screen) no longer makes the app drop the connection. It reconnects only when
   frames arrive and none decode for 30 s.

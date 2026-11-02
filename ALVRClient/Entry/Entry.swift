@@ -98,13 +98,6 @@ struct Entry: View {
             .padding(.top)
 
             VStack {
-                Toggle(isOn: $gStore.settings.handsAsControllers) {
-                    Text("Hands as controllers")
-                }
-                .toggleStyle(.switch)
-                .onChange(of: gStore.settings.handsAsControllers) {
-                    saveAction()
-                }
                 Toggle(isOn: Binding(
                     get: { gStore.settings.chaperoneDistanceCm > 0 },
                     set: { gStore.settings.chaperoneDistanceCm = $0 ? 30 : 0; saveAction() }

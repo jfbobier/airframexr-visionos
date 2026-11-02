@@ -57,9 +57,7 @@ enum BindingSource {
 }
 
 /// Bindings are tagged so callers can suppress a subset without the profile
-/// needing to know why. Emulated pinch interactions currently take over the
-/// triggers, which is what the scattered `leftPinchTrigger <= 0.0` guards in
-/// WorldTracker are doing today.
+/// needing to know why.
 enum BindingGroup {
     case general
     case leftTrigger

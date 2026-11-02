@@ -12,7 +12,6 @@ struct GlobalSettings: Codable {
     var keepSteamVRCenter: Bool = false
     var showHandsOverlaid: Bool = false
     var disablePersistentSystemOverlays: Bool = true
-    var enableDoubleTapForHands: Bool = false
     var streamFPS: String = "Default"
     var chromaKeyEnabled: Bool = false
     var chromaKeyFromStreamer: Bool = true
@@ -22,12 +21,9 @@ struct GlobalSettings: Codable {
     var chromaKeyColorG: Float = 124.0 / 255.0
     var chromaKeyColorB: Float = 16.0 / 255.0
     var dismissWindowOnEnter: Bool = true
-    var emulatedPinchInteractions: Bool = false
     /// Floor height offset in centimetres, added to whatever height the headset reports; positive raises the
     /// player in the game. 0 = the headset's reading as is.
     var heightOffsetCm: Int = 0
-    /// On: hands also appear as controllers (pose, and a pinch is the trigger). Off: the hand skeleton only.
-    var handsAsControllers: Bool = true
     /// Enter the streamer as soon as the connection is up, without pressing Enter.
     var autoConnect: Bool = false
     var targetHandsAtRoundtripLatency = false
@@ -45,7 +41,6 @@ struct GlobalSettings: Codable {
         self.keepSteamVRCenter = try container.decodeIfPresent(Bool.self, forKey: .keepSteamVRCenter) ?? self.keepSteamVRCenter
         self.showHandsOverlaid = try container.decodeIfPresent(Bool.self, forKey: .showHandsOverlaid) ?? self.showHandsOverlaid
         self.disablePersistentSystemOverlays = try container.decodeIfPresent(Bool.self, forKey: .disablePersistentSystemOverlays) ?? self.disablePersistentSystemOverlays
-        self.enableDoubleTapForHands = try container.decodeIfPresent(Bool.self, forKey: .enableDoubleTapForHands) ?? self.enableDoubleTapForHands
         self.streamFPS = try container.decodeIfPresent(String.self, forKey: .streamFPS) ?? self.streamFPS
         self.chromaKeyEnabled = try container.decodeIfPresent(Bool.self, forKey: .chromaKeyEnabled) ?? self.chromaKeyEnabled
         self.chromaKeyFromStreamer = try container.decodeIfPresent(Bool.self, forKey: .chromaKeyFromStreamer) ?? self.chromaKeyFromStreamer
@@ -55,9 +50,7 @@ struct GlobalSettings: Codable {
         self.chromaKeyColorG = try container.decodeIfPresent(Float.self, forKey: .chromaKeyColorG) ?? self.chromaKeyColorG
         self.chromaKeyColorB = try container.decodeIfPresent(Float.self, forKey: .chromaKeyColorB) ?? self.chromaKeyColorB
         self.dismissWindowOnEnter = try container.decodeIfPresent(Bool.self, forKey: .dismissWindowOnEnter) ?? self.dismissWindowOnEnter
-        self.emulatedPinchInteractions = try container.decodeIfPresent(Bool.self, forKey: .emulatedPinchInteractions) ?? self.emulatedPinchInteractions
         self.heightOffsetCm = try container.decodeIfPresent(Int.self, forKey: .heightOffsetCm) ?? self.heightOffsetCm
-        self.handsAsControllers = try container.decodeIfPresent(Bool.self, forKey: .handsAsControllers) ?? self.handsAsControllers
         self.autoConnect = try container.decodeIfPresent(Bool.self, forKey: .autoConnect) ?? self.autoConnect
         self.targetHandsAtRoundtripLatency = try container.decodeIfPresent(Bool.self, forKey: .targetHandsAtRoundtripLatency) ?? self.targetHandsAtRoundtripLatency
         self.showFaceTrackingDebug = try container.decodeIfPresent(Bool.self, forKey: .showFaceTrackingDebug) ?? self.showFaceTrackingDebug
