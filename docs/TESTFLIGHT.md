@@ -270,6 +270,11 @@ After the first upload (10 to 20 minutes of processing, you get an email), open
    - **External testers** (a community or Discord group: only an email address or a link, no developer account needed):
      **External Testing** > **+** > create a group > **Enable Public Link** and share the link. The **first build of a
      version goes through a short Beta App Review** (usually under a day).
+   - **Public link from the workflow:** run **TestFlight** with **public_link** ticked. After the upload the run waits for
+     processing, creates (or reuses) the external group named in **public_group_name** (default `Public`), enables its public
+     link, adds the build, submits it for Beta App Review and prints the link (also in the run summary). To add the link to a build that is already uploaded, also fill **existing_build** with its number (for example `21`): the archive and upload are skipped and only the link step runs. The API key needs
+     the **Admin** or **App Manager** role. Beta App Review needs your contact details once, under TestFlight >
+     **Test Information**; if they are missing the run warns and the link stays inactive until the review is submitted by hand.
 3. **Installing.** Testers install the **TestFlight** app on the Vision Pro (search "TestFlight" in the App Store, or
    https://apps.apple.com/app/testflight/id899247664), open the invitation or the public link, and tap **Install**.
 

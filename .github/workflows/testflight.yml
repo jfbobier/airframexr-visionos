@@ -20,6 +20,16 @@ on:
         description: "Only check that the Release archive builds (no signing, no secrets needed, nothing is uploaded)"
         type: boolean
         default: false
+      public_link:
+        description: "After the upload: add the build to the external group named below, enable its public link, submit the build for Beta App Review and print the link"
+        type: boolean
+        default: false
+      existing_build:
+        description: "Build number already uploaded (e.g. 21): skip archive and upload, only do the public link step for that build"
+        default: ""
+      public_group_name:
+        description: "Name of the external TestFlight group that carries the public link (created if missing)"
+        default: "Public"
       revoke_ci_certificates:
         description: "First revoke the certificates earlier runs created on the team ('Created via API'): tick when signing says the account has reached the maximum number of certificates"
         type: boolean
@@ -35,6 +45,7 @@ concurrency:
 jobs:
   testflight:
     name: Archive and upload
+    if: ${{ inputs.existing_build == '' }}
     runs-on: xcode-27
     timeout-minutes: 90
     env:
@@ -224,3 +235,94 @@ jobs:
           name: testflight-logs
           path: build/*.log
           if-no-files-found: ignore
+
+  public-link:
+    name: Public TestFlight link
+    needs: testflight
+    if: ${{ !cancelled() && inputs.public_link && !inputs.unsigned_check && (needs.testflight.result == 'success' || needs.testflight.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+      BUNDLE_ID: ${{ vars.BUNDLE_ID }}
+      MARKETING_VERSION: ${{ inputs.marketing_version }}
+      BUILD_NUMBER: ${{ inputs.existing_build || github.run_number }}
+      GROUP_NAME: ${{ inputs.public_group_name }}
+    steps:
+      - name: Public link
+        run: |
+          mkdir -p "$RUNNER_TEMP/asc"
+          printf '%s\n' "$ASC_KEY_P8" > "$RUNNER_TEMP/asc/key.p8"
+          export ASC_KEY_PATH="$RUNNER_TEMP/asc/key.p8"
+          # Uses the same App Store Connect API key as the upload (role Admin or App Manager). Idempotent: an existing group is reused.
+          python3 -m pip install --quiet --disable-pip-version-check --break-system-packages pyjwt cryptography
+          python3 - <<'PY'
+          import json, os, sys, time, urllib.error, urllib.parse, urllib.request, jwt
+          E = os.environ
+          key = open(E["ASC_KEY_PATH"]).read()
+          def token():
+              return jwt.encode({"iss": E["ASC_ISSUER_ID"], "iat": int(time.time()), "exp": int(time.time()) + 900, "aud": "appstoreconnect-v1"}, key, algorithm="ES256", headers={"kid": E["ASC_KEY_ID"]})
+          def call(method, path, body=None, ok_errors=()):
+              url = path if path.startswith("http") else "https://api.appstoreconnect.apple.com" + path
+              data = json.dumps(body).encode() if body is not None else None
+              req = urllib.request.Request(url, data=data, method=method, headers={"Authorization": "Bearer " + token(), "Content-Type": "application/json"})
+              try:
+                  with urllib.request.urlopen(req) as r:
+                      raw = r.read()
+                      return json.loads(raw) if raw else {}
+              except urllib.error.HTTPError as e:
+                  detail = e.read().decode()[:1500]
+                  if e.code in ok_errors:
+                      print(f"::warning::{method} {path} -> {e.code}: {detail}")
+                      return None
+                  print(f"::error::{method} {path} -> {e.code}: {detail}")
+                  sys.exit(1)
+          q = urllib.parse.quote
+          app = call("GET", f"/v1/apps?filter[bundleId]={q(E['BUNDLE_ID'])}")["data"]
+          if not app:
+              print("::error::no app record with this bundle id"); sys.exit(1)
+          app_id = app[0]["id"]
+          # the uploaded build appears after processing (10 to 20 minutes)
+          build = None
+          for i in range(60):
+              r = call("GET", f"/v1/builds?filter[app]={app_id}&filter[version]={E['BUILD_NUMBER']}&filter[preReleaseVersion.version]={q(E['MARKETING_VERSION'])}&limit=1")["data"]
+              if r:
+                  build = r[0]
+                  st = build["attributes"].get("processingState")
+                  print(f"build {E['MARKETING_VERSION']} ({E['BUILD_NUMBER']}): {st}")
+                  if st == "VALID":
+                      break
+                  if st in ("FAILED", "INVALID"):
+                      print("::error::build processing failed"); sys.exit(1)
+              else:
+                  print("build not visible yet")
+              time.sleep(30)
+          else:
+              print("::error::build did not finish processing in 30 minutes"); sys.exit(1)
+          bid = build["id"]
+          # group
+          groups = call("GET", f"/v1/apps/{app_id}/betaGroups?limit=200")["data"]
+          grp = next((g for g in groups if g["attributes"]["name"] == E["GROUP_NAME"] and not g["attributes"].get("isInternalGroup")), None)
+          if grp is None:
+              grp = call("POST", "/v1/betaGroups", {"data": {"type": "betaGroups",
+                  "attributes": {"name": E["GROUP_NAME"], "publicLinkEnabled": True, "publicLinkLimitEnabled": False, "feedbackEnabled": True},
+                  "relationships": {"app": {"data": {"type": "apps", "id": app_id}}}}})["data"]
+              print("created group", grp["id"])
+          elif not grp["attributes"].get("publicLinkEnabled"):
+              grp = call("PATCH", f"/v1/betaGroups/{grp['id']}", {"data": {"type": "betaGroups", "id": grp["id"], "attributes": {"publicLinkEnabled": True, "publicLinkLimitEnabled": False}}})["data"]
+          gid = grp["id"]
+          call("POST", f"/v1/betaGroups/{gid}/relationships/builds", {"data": [{"type": "builds", "id": bid}]}, ok_errors=(409,))
+          # Beta App Review (needed once per version for external testers). Needs contact details in App Store Connect > TestFlight > Test Information.
+          call("POST", "/v1/betaAppReviewSubmissions", {"data": {"type": "betaAppReviewSubmissions", "relationships": {"build": {"data": {"type": "builds", "id": bid}}}}}, ok_errors=(409, 422))
+          grp = call("GET", f"/v1/betaGroups/{gid}")["data"]
+          link = grp["attributes"].get("publicLink")
+          rev = call("GET", f"/v1/builds/{bid}/betaAppReviewSubmission", ok_errors=(404,))
+          state = rev["data"]["attributes"].get("betaReviewState") if rev and rev.get("data") else "none"
+          print(f"Beta App Review state: {state}")
+          print(f"PUBLIC LINK: {link}")
+          with open(E["GITHUB_STEP_SUMMARY"], "a") as f:
+              f.write(f"### TestFlight public link\n\n{link}\n\nBeta App Review: {state}. The link installs the build once Apple has approved it (first build of a version).\n")
+          PY
+
