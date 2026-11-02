@@ -79,7 +79,8 @@ workflow files show the exact commands (Rust client core, cbindgen, `repack_alvr
 
 Stream transitions: the app going unstable, or closing itself, when the stream starts, when a game stalls or loads, or when the frame
 rate drops. Found with a new protocol harness (`tools/protocol-harness/`, below) that runs the app's own `EventHandler.swift` on Linux
-against a scripted streamer, plus ThreadSanitizer. Built by CI only; not tested on a headset.
+against a scripted streamer, plus ThreadSanitizer. TestFlight build 21 (the transition fixes, before the hand input below was
+removed): testers report no transition errors any more (2026-11-02).
 
 - All hand input is removed: the system pinch gesture (and the double pinch that sent A / X), hands as controllers, the hand skeleton, the
   "Hands as controllers" switch and the controllers-clack toggle. Users reported random commands from the pinch. ARKit hand tracking
