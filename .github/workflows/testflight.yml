@@ -27,6 +27,9 @@ on:
       existing_build:
         description: "Build number already uploaded (e.g. 21): skip archive and upload, only do the public link step for that build"
         default: ""
+      invite_testers:
+        description: "Internal testers to invite, separated by ';' as email:First Last (e.g. a@b.com:Ann Lee). Only this runs: no build. People must accept the App Store Connect invitation, then run again to add them to the group"
+        default: ""
       public_group_name:
         description: "Name of the external TestFlight group that carries the public link (created if missing)"
         default: "Public"
@@ -45,7 +48,7 @@ concurrency:
 jobs:
   testflight:
     name: Archive and upload
-    if: ${{ inputs.existing_build == '' }}
+    if: ${{ inputs.existing_build == '' && inputs.invite_testers == '' }}
     runs-on: xcode-27
     timeout-minutes: 90
     env:
@@ -351,3 +354,74 @@ jobs:
               f.write(f"### TestFlight public link\n\n{link}\n\nBeta App Review: {state}. The link installs the build once Apple has approved it (first build of a version).\n")
           PY
 
+  invite-testers:
+    name: Invite internal testers
+    if: ${{ inputs.invite_testers != '' && !inputs.unsigned_check }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+      BUNDLE_ID: ${{ vars.BUNDLE_ID }}
+      INVITES: ${{ inputs.invite_testers }}
+    steps:
+      - name: Invite and add to the internal group
+        run: |
+          # Internal testers must be App Store Connect users first (role Marketing, limited to this app). Step 1 invites them, they accept by email,
+          # step 2 (this same run, next time) adds accepted users to the internal group. Safe to repeat. The key needs the Admin role.
+          mkdir -p "$RUNNER_TEMP/asc"
+          printf '%s\n' "$ASC_KEY_P8" > "$RUNNER_TEMP/asc/key.p8"
+          export ASC_KEY_PATH="$RUNNER_TEMP/asc/key.p8"
+          python3 -m pip install --quiet --disable-pip-version-check --break-system-packages pyjwt cryptography
+          python3 - <<'PY'
+          import json, os, sys, time, urllib.error, urllib.parse, urllib.request, jwt
+          E = os.environ
+          key = open(E["ASC_KEY_PATH"]).read()
+          def call(method, path, body=None, ok_errors=()):
+              tok = jwt.encode({"iss": E["ASC_ISSUER_ID"], "iat": int(time.time()), "exp": int(time.time()) + 600, "aud": "appstoreconnect-v1"}, key, algorithm="ES256", headers={"kid": E["ASC_KEY_ID"]})
+              url = "https://api.appstoreconnect.apple.com" + path
+              req = urllib.request.Request(url, data=json.dumps(body).encode() if body is not None else None, method=method, headers={"Authorization": "Bearer " + tok, "Content-Type": "application/json"})
+              try:
+                  with urllib.request.urlopen(req) as r:
+                      raw = r.read()
+                      return json.loads(raw) if raw else {}
+              except urllib.error.HTTPError as e:
+                  detail = e.read().decode()[:1200]
+                  if e.code in ok_errors:
+                      print(f"::warning::{method} {path} -> {e.code}: {detail}")
+                      return None
+                  print(f"::error::{method} {path} -> {e.code}: {detail}")
+                  sys.exit(1)
+          q = urllib.parse.quote
+          app_id = call("GET", f"/v1/apps?filter[bundleId]={q(E['BUNDLE_ID'])}")["data"][0]["id"]
+          groups = call("GET", f"/v1/apps/{app_id}/betaGroups?limit=200")["data"]
+          grp = next((g for g in groups if g["attributes"].get("isInternalGroup")), None)
+          if grp is None:
+              grp = call("POST", "/v1/betaGroups", {"data": {"type": "betaGroups", "attributes": {"name": "Internal", "isInternalGroup": True, "hasAccessToAllBuilds": True},
+                  "relationships": {"app": {"data": {"type": "apps", "id": app_id}}}}})["data"]
+              print("created internal group", grp["id"])
+          gid = grp["id"]
+          for item in E["INVITES"].split(";"):
+              item = item.strip()
+              if not item:
+                  continue
+              email, _, name = item.partition(":")
+              email = email.strip().lower()
+              first, _, last = name.strip().partition(" ")
+              if not (email and first and last.strip()):
+                  print(f"::error::'{item}': expected email:First Last"); sys.exit(1)
+              users = call("GET", f"/v1/users?filter[username]={q(email)}")["data"]
+              if users:
+                  r = call("POST", "/v1/betaTesters", {"data": {"type": "betaTesters", "attributes": {"email": email, "firstName": first, "lastName": last.strip()},
+                      "relationships": {"betaGroups": {"data": [{"type": "betaGroups", "id": gid}]}}}}, ok_errors=(409,))
+                  print(f"{email}: user on the team, added to the internal group" if r is not None else f"{email}: already a tester (or see warning)")
+                  continue
+              pend = call("GET", f"/v1/userInvitations?filter[email]={q(email)}")["data"]
+              if pend:
+                  print(f"{email}: invitation already sent, waiting for them to accept")
+                  continue
+              call("POST", "/v1/userInvitations", {"data": {"type": "userInvitations", "attributes": {"email": email, "firstName": first, "lastName": last.strip(), "roles": ["MARKETING"], "allAppsVisible": False, "provisioningAllowed": False},
+                  "relationships": {"visibleApps": {"data": [{"type": "apps", "id": app_id}]}}}})
+              print(f"{email}: invitation sent (role Marketing, this app only). After they accept, run again to add them to the group")
+          PY
