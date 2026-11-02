@@ -250,6 +250,13 @@ jobs:
       MARKETING_VERSION: ${{ inputs.marketing_version }}
       BUILD_NUMBER: ${{ inputs.existing_build || github.run_number }}
       GROUP_NAME: ${{ inputs.public_group_name }}
+      # Test Information that Beta App Review requires (repository variables, optional: unset = left as it is in App Store Connect)
+      BETA_DESCRIPTION: ${{ vars.BETA_DESCRIPTION }}
+      BETA_FEEDBACK_EMAIL: ${{ vars.BETA_FEEDBACK_EMAIL }}
+      BETA_CONTACT_FIRST: ${{ vars.BETA_CONTACT_FIRST }}
+      BETA_CONTACT_LAST: ${{ vars.BETA_CONTACT_LAST }}
+      BETA_CONTACT_PHONE: ${{ vars.BETA_CONTACT_PHONE }}
+      BETA_CONTACT_EMAIL: ${{ vars.BETA_CONTACT_EMAIL }}
     steps:
       - name: Public link
         run: |
@@ -314,6 +321,24 @@ jobs:
               grp = call("PATCH", f"/v1/betaGroups/{grp['id']}", {"data": {"type": "betaGroups", "id": grp["id"], "attributes": {"publicLinkEnabled": True, "publicLinkLimitEnabled": False}}})["data"]
           gid = grp["id"]
           call("POST", f"/v1/betaGroups/{gid}/relationships/builds", {"data": [{"type": "builds", "id": bid}]}, ok_errors=(409,))
+          # Test Information: description + feedback email (localization) and the review contact
+          if E.get("BETA_DESCRIPTION"):
+              attrs = {"description": E["BETA_DESCRIPTION"]}
+              if E.get("BETA_FEEDBACK_EMAIL"):
+                  attrs["feedbackEmail"] = E["BETA_FEEDBACK_EMAIL"]
+              locs = call("GET", f"/v1/apps/{app_id}/betaAppLocalizations")["data"]
+              loc = next((l for l in locs if l["attributes"]["locale"].startswith("en")), None)
+              if loc:
+                  call("PATCH", f"/v1/betaAppLocalizations/{loc['id']}", {"data": {"type": "betaAppLocalizations", "id": loc["id"], "attributes": attrs}})
+              else:
+                  call("POST", "/v1/betaAppLocalizations", {"data": {"type": "betaAppLocalizations", "attributes": dict(attrs, locale="en-US"),
+                      "relationships": {"app": {"data": {"type": "apps", "id": app_id}}}}})
+              print("beta app description set")
+          contact = {k: E[v] for k, v in (("contactFirstName", "BETA_CONTACT_FIRST"), ("contactLastName", "BETA_CONTACT_LAST"), ("contactPhone", "BETA_CONTACT_PHONE"), ("contactEmail", "BETA_CONTACT_EMAIL")) if E.get(v)}
+          if contact:
+              det = call("GET", f"/v1/apps/{app_id}/betaAppReviewDetail")["data"]
+              call("PATCH", f"/v1/betaAppReviewDetails/{det['id']}", {"data": {"type": "betaAppReviewDetails", "id": det["id"], "attributes": dict(contact, demoAccountRequired=False)}})
+              print("beta review contact set")
           # Beta App Review (needed once per version for external testers). Needs contact details in App Store Connect > TestFlight > Test Information.
           call("POST", "/v1/betaAppReviewSubmissions", {"data": {"type": "betaAppReviewSubmissions", "relationships": {"build": {"data": {"type": "builds", "id": bid}}}}}, ok_errors=(409, 422))
           grp = call("GET", f"/v1/betaGroups/{gid}")["data"]
