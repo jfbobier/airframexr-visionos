@@ -280,6 +280,30 @@ class Renderer {
         EventHandler.shared.renderStarted = true
     }
     
+    /// Pipeline rebuilds off the render thread, one at a time. The first frames of every stream ask for one on several
+    /// consecutive frames (views declared, gamma, YUV transform: `encodingGamma` only changes once a rebuild has run), and
+    /// each request used to start its own thread, so several rebuilds wrote the same pipeline properties at once. Now a
+    /// request while one is queued is folded into it; a request while one runs queues exactly one more.
+    private let pipelineRebuildQueue = DispatchQueue(label: "Rebuild Render Pipelines", qos: .userInitiated)
+    private let pipelineRebuildLock = NSLock()
+    private var pipelineRebuildQueued = false
+
+    func requestPipelineRebuild() {
+        pipelineRebuildLock.lock()
+        if pipelineRebuildQueued {
+            pipelineRebuildLock.unlock()
+            return
+        }
+        pipelineRebuildQueued = true
+        pipelineRebuildLock.unlock()
+        pipelineRebuildQueue.async {
+            self.pipelineRebuildLock.lock()
+            self.pipelineRebuildQueued = false
+            self.pipelineRebuildLock.unlock()
+            self.rebuildRenderPipelines()
+        }
+    }
+
     func rebuildRenderPipelines() {
         print("rebuildRenderPipelines")
 
@@ -685,39 +709,20 @@ class Renderer {
         roundTripRenderTime = CACurrentMediaTime() - lastRoundTripRenderTimestamp
         lastRoundTripRenderTimestamp = CACurrentMediaTime()
 
-        let startPollTime = CACurrentMediaTime()
-        while true {
-            sched_yield()
-            
-            // If visionOS skipped our last frame, let the queue fill up a bit
-            if EventHandler.shared.lastQueuedFrame != nil {
-                if EventHandler.shared.lastQueuedFrame!.timestamp != EventHandler.shared.lastSubmittedTimestamp && EventHandler.shared.frameQueue.count < 2 {
-                    queuedFrame = EventHandler.shared.lastQueuedFrame
-                    EventHandler.shared.framesRendered -= 1
-                    isReprojected = false
-                    break
-                }
-            }
-            
-            objc_sync_enter(EventHandler.shared.frameQueueLock)
-            queuedFrame = EventHandler.shared.frameQueue.count > 0 ? EventHandler.shared.frameQueue.removeFirst() : nil
-            objc_sync_exit(EventHandler.shared.frameQueueLock)
-            if queuedFrame != nil {
-                break
-            }
-            
-            if CACurrentMediaTime() - startPollTime > 0.005 {
-                //EventHandler.shared.framesRendered -= 1
-                break
-            }
-        }
-        
-        // Recycle old frame with old timestamp/anchor (visionOS doesn't do timewarp for us?)
-        if queuedFrame == nil && EventHandler.shared.lastQueuedFrame != nil {
-            //print("Using last frame...")
-            queuedFrame = EventHandler.shared.lastQueuedFrame
+        // Locked pick (EventHandler.pollFrameForDisplay): the stream stop clears the last frame from the events thread
+        switch EventHandler.shared.pollFrameForDisplay(timeout: 0.005) {
+        case .resubmit(let f):
+            queuedFrame = f
+            EventHandler.shared.framesRendered -= 1
+            isReprojected = false
+        case .fresh(let f):
+            queuedFrame = f
+        case .reprojected(let f):
+            queuedFrame = f
             EventHandler.shared.framesRendered -= 1
             isReprojected = true
+        case .none:
+            break
         }
         
         if queuedFrame == nil && streamingActiveForFrame {
@@ -738,7 +743,7 @@ class Renderer {
             drawables = frame.queryDrawables()
             if drawables.isEmpty {
                 if queuedFrame != nil {
-                    EventHandler.shared.lastQueuedFrame = queuedFrame
+                    EventHandler.shared.publishShownFrame(queuedFrame)
                 }
                 return
             }
@@ -748,7 +753,7 @@ class Renderer {
         else {
             guard let _drawable = frame.queryDrawable() else {
                 if queuedFrame != nil {
-                    EventHandler.shared.lastQueuedFrame = queuedFrame
+                    EventHandler.shared.publishShownFrame(queuedFrame)
                 }
                 return
             }
@@ -758,7 +763,7 @@ class Renderer {
 #else
         guard let _drawable = frame.queryDrawable() else {
             if queuedFrame != nil {
-                EventHandler.shared.lastQueuedFrame = queuedFrame
+                EventHandler.shared.publishShownFrame(queuedFrame)
             }
             return
         }
@@ -792,11 +797,7 @@ class Renderer {
                     EventHandler.shared.framesRendered = 0
                     lastReconfigureTime = CACurrentMediaTime()
                     
-                    let rebuildThread = Thread {
-                        self.rebuildRenderPipelines()
-                    }
-                    rebuildThread.name = "Rebuild Render Pipelines Thread"
-                    rebuildThread.start()
+                    requestPipelineRebuild()
                 }
                 
                 // TODO: Fix tangents to fill entire FoV if canting ever becomes more intense like PFD was
@@ -854,11 +855,7 @@ class Renderer {
             
             if needsPipelineRebuild {
                 lastReconfigureTime = CACurrentMediaTime()
-                let rebuildThread = Thread {
-                    self.rebuildRenderPipelines()
-                }
-                rebuildThread.name = "Rebuild Render Pipelines Thread"
-                rebuildThread.start()
+                requestPipelineRebuild()
             }
         }
         
@@ -921,7 +918,7 @@ class Renderer {
         let deviceAnchor = WorldTracker.shared.worldTracking.queryDeviceAnchor(atTimestamp: vsyncTime)
         
         commandBuffer.addCompletedHandler { (_ commandBuffer)-> Swift.Void in
-            if EventHandler.shared.alvrInitialized && queuedFrame != nil && EventHandler.shared.lastSubmittedTimestamp != queuedFrame?.timestamp {
+            if EventHandler.shared.alvrInitialized, let submitted = queuedFrame, EventHandler.shared.markSubmitted(submitted.timestamp) {
                 let currentTimeNs = UInt64(CACurrentMediaTime() * Double(NSEC_PER_SEC))
                 
                 //let currentTimeNs = UInt64(commandBuffer.gpuEndTime * Double(NSEC_PER_SEC))
@@ -929,9 +926,9 @@ class Renderer {
                 //print((commandBuffer.gpuEndTime - commandBuffer.gpuStartTime) * 1000.0)
                 
                 //print("Finished:", queuedFrame!.timestamp)
-                alvr_report_submit(queuedFrame!.timestamp, vsyncTimeNs &- currentTimeNs)
-
-                EventHandler.shared.lastSubmittedTimestamp = queuedFrame!.timestamp
+                // A frame finished after its presentation time has no vsync queue left (0, not a wrapped ~1.8e19 ns that would
+                // pin the head-prediction average at its cap for the next statistics window)
+                alvr_report_submit(submitted.timestamp, vsyncTimeNs > currentTimeNs ? vsyncTimeNs - currentTimeNs : 0)
             }
             if ALVRClientApp.gStore.settings.showPerformanceHud, let ts = queuedFrame?.timestamp {
                 PerformanceTracker.shared.recordSubmit(timestampNs: ts)
@@ -1060,7 +1057,7 @@ class Renderer {
         commandBuffer.commit()
         frame.endSubmission()
         
-        EventHandler.shared.lastQueuedFrame = queuedFrame
+        EventHandler.shared.publishShownFrame(queuedFrame)
         EventHandler.shared.lastQueuedFramePose = framePreviouslyPredictedPose
     }
     

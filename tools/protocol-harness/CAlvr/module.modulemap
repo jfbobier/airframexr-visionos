@@ -1,0 +1,4 @@
+module CAlvr {
+    header "alvr_client_core.h"
+    export *
+}

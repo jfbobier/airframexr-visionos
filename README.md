@@ -5,7 +5,7 @@ PC runs the game through AirFrameXR's OpenXR runtime (frame generation, foveated
 the ALVR v20 protocol, and this app shows it on the Vision Pro with hand and PlayStation VR2 Sense controller
 tracking.
 
-Version 1.2.2 (numbered with the AirFrameXR streamer it pairs with). Nearly feature complete; what is left is listed at the end.
+Version 1.3.1 (numbered with the AirFrameXR streamer it pairs with). Nearly feature complete; what is left is listed at the end.
 
 ## Credits
 
@@ -77,6 +77,44 @@ Everything below is in the `airframexr-client` branch on top of upstream `main`.
 
 Same as upstream: see the [Building](https://github.com/alvr-org/alvr-visionos/wiki/Building) wiki page. The CI
 workflow files show the exact commands (Rust client core, cbindgen, `repack_alvr_client.sh`, then `xcodebuild`).
+
+## 1.3.1 (2026-11-02)
+
+Stream transitions: the app going unstable, or closing itself, when the stream starts, when a game stalls or loads, or when the frame
+rate drops. Found with a new protocol harness (`tools/protocol-harness/`, below) that runs the app's own `EventHandler.swift` on Linux
+against a scripted streamer, plus ThreadSanitizer. Built by CI only; not tested on a headset.
+
+- A game that sends nothing for 30 s (a long loading screen) no longer makes the app drop the connection. It reconnects only when
+  frames arrive and none decode for 30 s.
+- A new decoder when the streamer's stream configuration changes on the same connection (AirFrameXR does this when a game exits after
+  a deferred stream change). The old decoder was kept and the picture froze until the app was restarted. A decoder that shows no
+  picture for a second of frames is also rebuilt.
+- The app no longer closes on a short "background" report from visionOS: it leaves once the background state has held for one second.
+- The decoder, the frame queue and the last shown frame are shared by the network, render and event threads. They are now read and
+  written under one lock, so a stream stop or restart cannot swap them under a thread that is using them. These were ThreadSanitizer
+  findings and crash candidates at every transition.
+- Smaller fixes:
+  - A tracking worker that could wait forever after startup.
+  - Render pipeline rebuilds run one at a time (several used to run at once at every stream start).
+  - A frame finished after its presentation time reports no queue time, instead of a wrapped value that held head prediction at its
+    cap.
+- Transitions write `[stream]` lines into the streamer's log: decoder rebuilds, the reconnect rule, background exits. If the app
+  still closes, look there first.
+
+Not covered by the harness: Metal, the real VideoToolbox and the visionOS watchdog. Its streamer answers an IDR request instantly,
+so its recovery times are best cases.
+
+**Protocol harness:** `tools/protocol-harness/build.sh [--tsan]` then `run.sh [--tsan]` (Swift for Linux, no Mac). In the AirFrameXR
+repository, `python3 harness/stability/run_stability.py client [--tsan]` runs the same thing. Before / after on the same 15
+scenarios:
+
+| Scenario | 1.2.2 | 1.3.1 |
+|---|---|---|
+| 35 s stall | the app drops the connection | passes |
+| encoder rebuilt mid-connection | picture frozen | passes |
+| 0.3 s background report | the app closes | passes |
+| idle to game, fps drops, 1 / 6 s stalls, choking game, irregular cadence, restarts | pass | pass |
+| ThreadSanitizer | races on the decoder and the last shown frame | only simple counters and timers left |
 
 ## 1.2.2 (2026-10-31)
 

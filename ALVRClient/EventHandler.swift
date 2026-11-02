@@ -85,6 +85,13 @@ final class OutgoingWorker {
     func restartWorkers() {
         print("Starting all OutgoingWorkers.")
         currentIdxLock.lock()
+        // Conditions and the stop flag first, threads second: a worker that started before its condition was replaced
+        // waited on the old one forever, and every send queued to its slot was lost (ThreadSanitizer, protocol harness).
+        for i in 0..<3 {
+            pendingWork[i] = nil
+            condition[i] = NSCondition()
+        }
+        shouldStop = false
         for i in 0..<3 {
             outgoingThreads[i] = Thread {
                 self.threadMain(i)
@@ -92,12 +99,7 @@ final class OutgoingWorker {
             outgoingThreads[i]?.qualityOfService = .userInteractive
             outgoingThreads[i]?.name = self.name + " " + String(i)
             outgoingThreads[i]?.start()
-            
-            pendingWork[i] = nil
-            condition[i] = NSCondition()
         }
-        
-        shouldStop = false
         currentIdxLock.unlock()
     }
 }
@@ -141,6 +143,12 @@ class EventHandler: ObservableObject {
     var lastQueuedFramePose: simd_float4x4? = nil
     var lastRequestedTimestamp: UInt64 = 0
     var lastSubmittedTimestamp: UInt64 = 0
+    /// the parameter sets the current decoder session was built from (the streamer re-sends them with every IDR; a change
+    /// means a new stream configuration and needs a new session)
+    var decoderConfigBytes: [UInt8]? = nil
+    var consecutiveDecodeErrors = 0
+    var decoderRebuildPending = false
+    var backgroundSince: Double = 0
     var lastIpd: Float = -1
     var viewTransforms: [simd_float4x4] = [matrix_identity_float4x4, matrix_identity_float4x4]
     var viewFovs: [AlvrFov] = [AlvrFov(left: -1.0471973, right: 0.7853982, up: 0.7853982, down: -0.8726632), AlvrFov(left: -0.7853982, right: 1.0471973, up: 0.7853982, down: -0.8726632)]
@@ -162,6 +170,8 @@ class EventHandler: ObservableObject {
     var timeLastCheckedBackgrounded: Double = 0.0
     var timeLastAlvrEvent: Double = 0.0
     var timeLastFrameGot: Double = 0.0
+    /// when client_core last handed us a NAL (only handleNals writes it; timeLastFrameGot is also reset by the IDR nudge)
+    var timeLastNalArrived: Double = 0.0
     var timeLastFrameSent: Double = 0.0
     var timeLastFrameDecoded: Double = 0.0
     var numberOfEventThreadRestarts: Int = 0
@@ -190,8 +200,11 @@ class EventHandler: ObservableObject {
                 refreshRates = [120, 100, 96, 90]
             }
 
-            let capabilities = AlvrClientCapabilities(default_view_width: UInt32(renderWidth*2), default_view_height: UInt32(renderHeight*2), refresh_rates: refreshRates, refresh_rates_count: UInt64(refreshRates.count), foveated_encoding: true, encoder_high_profile: true, encoder_10_bits: true, encoder_av1: VTIsHardwareDecodeSupported(kCMVideoCodecType_AV1), prefer_10bit: true, prefer_full_range: true, preferred_encoding_gamma: 1.5, prefer_hdr: false)
-            alvr_initialize(/*capabilities=*/capabilities)
+            // The rates pointer must stay valid until alvr_initialize has copied it (a temporary array pointer does not)
+            refreshRates.withUnsafeBufferPointer { rates in
+                let capabilities = AlvrClientCapabilities(default_view_width: UInt32(renderWidth*2), default_view_height: UInt32(renderHeight*2), refresh_rates: rates.baseAddress, refresh_rates_count: UInt64(rates.count), foveated_encoding: true, encoder_high_profile: true, encoder_10_bits: true, encoder_av1: VTIsHardwareDecodeSupported(kCMVideoCodecType_AV1), prefer_10bit: true, prefer_full_range: true, preferred_encoding_gamma: 1.5, prefer_hdr: false)
+                alvr_initialize(/*capabilities=*/capabilities)
+            }
             alvr_initialize_logging()
             alvr_set_decoder_input_callback(nil, { data in return EventHandler.shared.handleNals(frameData: data) })
             alvr_resume()
@@ -228,16 +241,24 @@ class EventHandler: ObservableObject {
     func stop() {
         print("EventHandler.Stop")
         streamingActive = false
+        // The decoder, the frame queue and the last shown frame are read by client_core's video thread (handleNals) and
+        // the render thread while this runs (stream stop / restart): clear them under the lock those threads take.
+        objc_sync_enter(frameQueueLock)
         vtDecompressionSession = nil
         videoFormat = nil
-        lastRequestedTimestamp = 0
+        decoderConfigBytes = nil
+        consecutiveDecodeErrors = 0
+        decoderRebuildPending = false
+        frameQueue.removeAll()
+        lastQueuedFrame = nil
         lastSubmittedTimestamp = 0
+        objc_sync_exit(frameQueueLock)
+        lastRequestedTimestamp = 0
         framesRendered = 0
         framesSinceLastIDR = 0
         framesSinceLastDecode = 0
         lastIpd = -1
-        lastQueuedFrame = nil
-        
+
         //outgoingWorker.stopWorkers()
         
         updateConnectionState(.disconnected)
@@ -251,8 +272,10 @@ class EventHandler: ObservableObject {
         framesSinceLastIDR = 0
         framesSinceLastDecode = 0
         lastRequestedTimestamp = 0
+        objc_sync_enter(frameQueueLock)
         lastSubmittedTimestamp = 0
         lastQueuedFrame = nil
+        objc_sync_exit(frameQueueLock)
     }
     
     // Various hacks to be performed when the headset is removed or the app is exiting.
@@ -404,17 +427,9 @@ class EventHandler: ObservableObject {
             }
             
             DispatchQueue.main.async {
-                let state = UIApplication.shared.applicationState
-                if state == .background {
-                    print("App in background, exiting")
-                    if let service = self.mdnsListener {
-                        service.cancel()
-                        self.mdnsListener = nil
-                    }
-                    exit(0)
-                }
+                self.exitIfBackgrounded()
             }
-            
+
             lastEventHeartbeat = eventHeartbeat
             for _ in 0...5 {
                 usleep(1000*1000)
@@ -425,11 +440,143 @@ class EventHandler: ObservableObject {
     func resetEncoding() {
         needsEncoderReset = true
     }
+
+    /// What the render thread shows at this vsync (Renderer.renderFrame).
+    enum DisplayPick {
+        case none
+        /// a decoded frame taken from the queue
+        case fresh(QueuedFrame)
+        /// the last frame again, because visionOS skipped our last submission of it (not a repeat for the wearer)
+        case resubmit(QueuedFrame)
+        /// no new frame in time: the last one again, reprojected
+        case reprojected(QueuedFrame)
+    }
+
+    /// Render thread: waits up to `timeout` for a decoded frame. Everything it reads (queue, last shown frame, last
+    /// submitted timestamp) is written by other threads (decoder output, command-buffer completion, stream stop), so
+    /// every read happens under frameQueueLock and the last shown frame is read once.
+    func pollFrameForDisplay(timeout: Double) -> DisplayPick {
+        let startPollTime = CACurrentMediaTime()
+        while true {
+            sched_yield()
+            objc_sync_enter(frameQueueLock)
+            // If visionOS skipped our last frame, let the queue fill up a bit
+            if let last = lastQueuedFrame, last.timestamp != lastSubmittedTimestamp && frameQueue.count < 2 {
+                objc_sync_exit(frameQueueLock)
+                return .resubmit(last)
+            }
+            if !frameQueue.isEmpty {
+                let f = frameQueue.removeFirst()
+                objc_sync_exit(frameQueueLock)
+                return .fresh(f)
+            }
+            let last = lastQueuedFrame
+            objc_sync_exit(frameQueueLock)
+            if CACurrentMediaTime() - startPollTime > timeout {
+                // Recycle old frame with old timestamp/anchor (visionOS doesn't do timewarp for us?)
+                return last.map { .reprojected($0) } ?? .none
+            }
+        }
+    }
+
+    /// Render thread: the frame this vsync showed (nil: none), the reference for the next pick.
+    func publishShownFrame(_ frame: QueuedFrame?) {
+        objc_sync_enter(frameQueueLock)
+        lastQueuedFrame = frame
+        objc_sync_exit(frameQueueLock)
+    }
+
+    /// Command-buffer completion: true the first time a frame's timestamp is submitted (report it to the streamer then).
+    func markSubmitted(_ timestamp: UInt64) -> Bool {
+        objc_sync_enter(frameQueueLock)
+        defer { objc_sync_exit(frameQueueLock) }
+        if lastSubmittedTimestamp == timestamp { return false }
+        lastSubmittedTimestamp = timestamp
+        return true
+    }
+
+    /// client_core's video thread: a frame went into the decoder and no picture came out. A broken reference chain heals at
+    /// the next IDR (VideoHandler asks for one); a session that stays dead for a second of frames (invalidated after a
+    /// pause, or built from parameter sets that no longer match the stream) is rebuilt from the last decoder config.
+    func noteDecodeFailure(session: VTDecompressionSession) {
+        objc_sync_enter(frameQueueLock)
+        consecutiveDecodeErrors += 1
+        let failures = consecutiveDecodeErrors
+        let stillCurrent = vtDecompressionSession === session
+        let config = decoderConfigBytes
+        objc_sync_exit(frameQueueLock)
+        guard failures >= Int(refreshRate), stillCurrent, config != nil, currentCodec != ALVR_CODEC_AV1.rawValue else { return }
+        // Not from here: this runs inside the old session's output handler. The next handleNals rebuilds it, outside any decode.
+        objc_sync_enter(frameQueueLock)
+        decoderRebuildPending = true
+        objc_sync_exit(frameQueueLock)
+    }
+
+    /// Builds a decoder session from parameter sets and publishes it (session and format together) under the frame-queue lock.
+    func installDecoder(config: [UInt8], codec: Int) {
+        var bytes = config.isEmpty ? [UInt8(0)] : config
+        let (session, format) = bytes.withUnsafeMutableBufferPointer { VideoHandler.createVideoDecoder(initialNals: $0, codec: codec) }
+        objc_sync_enter(frameQueueLock)
+        vtDecompressionSession = session
+        videoFormat = format
+        decoderConfigBytes = session != nil ? config : nil
+        consecutiveDecodeErrors = 0
+        decoderRebuildPending = false
+        objc_sync_exit(frameQueueLock)
+        if session == nil {
+            streamLog("decoder session could not be created from \(config.count) config bytes (codec \(codec))")
+        }
+    }
+
+    /// A stream transition worth seeing in the streamer's log (`[stream]` lines; client errors reach the host log, prints
+    /// do not). Only for rare events: never per frame.
+    func streamLog(_ line: String) {
+        print(line)
+        ("[stream] " + line).withCString { alvr_log(UInt8(ALVR_LOG_LEVEL_ERROR.rawValue), $0) }
+    }
+
+    /// Main thread. The app leaves when visionOS puts it in the background, but only once the state has held for a second:
+    /// a one-off background report during a stream transition must not close the app.
+    func exitIfBackgrounded() {
+        let state = UIApplication.shared.applicationState
+        if state != .background {
+            if backgroundSince != 0 {
+                streamLog(String(format: "app was in the background for %.2f s, back now: not exiting", CACurrentMediaTime() - backgroundSince))
+            }
+            backgroundSince = 0
+            return
+        }
+        if backgroundSince == 0 {
+            backgroundSince = CACurrentMediaTime()
+            return
+        }
+        if CACurrentMediaTime() - backgroundSince < 1.0 {
+            return
+        }
+        streamLog("App in background, exiting")
+        if let service = self.mdnsListener {
+            service.cancel()
+            self.mdnsListener = nil
+        }
+        // Stops the lizard-mode keepalive. This works precisely
+        // because it is the *absence* of traffic and not a
+        // write: nothing has to reach the controller before
+        // exit(0) kills us, and the controller's own watchdog
+        // restores lizard mode a few seconds later.
+        SteamControllerManager.shared.stopAll()
+        exit(0)
+    }
     
     // Poll for NALs and and, when decoded, add them to the frameQueue
     func handleNals(frameData: AlvrVideoFrameData) -> Bool {
         var retVal = true
         self.timeLastFrameGot = CACurrentMediaTime()
+        // Frames resuming after a pause of the streamer (a stalled or loading game sends nothing) restart the no-decode clock:
+        // the 30 s reconnect rule is about frames that arrive and do not decode, not about the silence before them.
+        if self.timeLastFrameGot - self.timeLastNalArrived > 1.0 {
+            self.timeLastFrameSent = self.timeLastFrameGot
+        }
+        self.timeLastNalArrived = self.timeLastFrameGot
         
         // Prevent NAL buildup
         if !self.renderStarted {
@@ -501,18 +648,41 @@ class EventHandler: ObservableObject {
             print("Creating AV1 codec for real now.")
             let (attemptVtDecompressionSession, attemptVideoFormat) = VideoHandler.createVideoDecoder(initialNals: nal, codec: currentCodec)
             if attemptVtDecompressionSession != nil && attemptVideoFormat != nil {
+                objc_sync_enter(frameQueueLock)
                 vtDecompressionSession = attemptVtDecompressionSession
                 videoFormat = attemptVideoFormat
+                objc_sync_exit(frameQueueLock)
                 av1InstantiatedForReal = true
             }
         }
 
-        if let vtDecompressionSession = self.vtDecompressionSession {
-            VideoHandler.feedVideoIntoDecoder(decompressionSession: vtDecompressionSession, nals: nal, timestamp: timestamp, videoFormat: self.videoFormat!, codec: currentCodec) { [self] imageBuffer in
+        // A session that stopped producing pictures (noteDecodeFailure) is rebuilt here, between two decodes
+        objc_sync_enter(frameQueueLock)
+        let rebuildConfig = decoderRebuildPending ? decoderConfigBytes : nil
+        decoderRebuildPending = false
+        objc_sync_exit(frameQueueLock)
+        if let rebuildConfig {
+            streamLog("decoder produced no picture for a second of frames: rebuilding the decoder session")
+            installDecoder(config: rebuildConfig, codec: currentCodec)
+            resetEncoding()
+        }
+
+        // Session and format are swapped by the events thread (decoder config, stream stop): take both under the lock, once.
+        objc_sync_enter(frameQueueLock)
+        let sessionNow = self.vtDecompressionSession
+        let formatNow = self.videoFormat
+        objc_sync_exit(frameQueueLock)
+
+        if let vtDecompressionSession = sessionNow, let videoFormatNow = formatNow {
+            VideoHandler.feedVideoIntoDecoder(decompressionSession: vtDecompressionSession, nals: nal, timestamp: timestamp, videoFormat: videoFormatNow, codec: currentCodec) { [self] imageBuffer in
                 guard let imageBuffer = imageBuffer else {
                     //print("Frame not decoded")
+                    noteDecodeFailure(session: vtDecompressionSession)
                     return
                 }
+                objc_sync_enter(frameQueueLock)
+                consecutiveDecodeErrors = 0
+                objc_sync_exit(frameQueueLock)
                 if ALVRClientApp.gStore.settings.showPerformanceHud {
                     PerformanceTracker.shared.recordDecodeEnd(timestampNs: timestamp)
                 }
@@ -710,21 +880,7 @@ class EventHandler: ObservableObject {
             if currentTime - timeLastCheckedBackgrounded >= 0.1 {
                 timeLastCheckedBackgrounded = CACurrentMediaTime()
                 DispatchQueue.main.async {
-                    let state = UIApplication.shared.applicationState
-                    if state == .background {
-                        print("App in background, exiting")
-                        if let service = self.mdnsListener {
-                            service.cancel()
-                            self.mdnsListener = nil
-                        }
-                        // Stops the lizard-mode keepalive. This works precisely
-                        // because it is the *absence* of traffic and not a
-                        // write: nothing has to reach the controller before
-                        // exit(0) kills us, and the controller's own watchdog
-                        // restores lizard mode a few seconds later.
-                        SteamControllerManager.shared.stopAll()
-                        exit(0)
-                    }
+                    self.exitIfBackgrounded()
                 }
                 
                 if !renderStarted && streamingActive {
@@ -747,16 +903,14 @@ class EventHandler: ObservableObject {
                 kickAlvr()
             }*/
             
-            if (!renderStarted && timeLastAlvrEvent != 0 && timeLastFrameGot != 0 && (diffSinceLastEvent >= 20.0 || diffSinceLastNal >= 20.0))
-               || (renderStarted && timeLastAlvrEvent != 0 && timeLastFrameGot != 0 && (diffSinceLastEvent >= 30.0 || diffSinceLastNal >= 30.0))
-               || (renderStarted && timeLastFrameSent != 0 && (diffSinceLastDecode >= 30.0)) {
+            // Silence from the streamer is not a fault: it sends nothing while a game stalls or loads, and a dead link is
+            // already caught by client_core's keepalive (2 s). Tearing the connection down is only for a decoder that
+            // receives frames and has shown none for 30 s.
+            if renderStarted && timeLastFrameSent != 0 && diffSinceLastDecode >= 30.0 && currentTime - timeLastNalArrived < 1.0 {
                 EventHandler.shared.updateConnectionState(.disconnected)
                 
-                print("Kick ALVR...")
-                print("diffSinceLastEvent:", diffSinceLastEvent)
-                print("diffSinceLastNal:", diffSinceLastNal)
-                print("diffSinceLastDecode:", diffSinceLastDecode)
-                
+                streamLog(String(format: "Kick ALVR: frames arrive but none decoded for %.0f s, reconnecting", diffSinceLastDecode))
+
                 alvr_report_fatal_decoder_error("Gimme frames >:(")
                 
                 timeLastAlvrEvent = CACurrentMediaTime()
@@ -859,21 +1013,29 @@ class EventHandler: ObservableObject {
                 Settings.clearSettingsCache()
                 updateHostVersion()
 
-                // Don't reinstantiate the decoder if it's already created.
-                if vtDecompressionSession == nil {
-                    let numBytes = alvr_get_decoder_config(nil)
-                    var nalBuffer: UnsafeMutableBufferPointer<UInt8>? = nil
-                    if numBytes > 0 {
-                        nalBuffer = UnsafeMutableBufferPointer<UInt8>.allocate(capacity: Int(numBytes))
+                // The streamer re-sends the same config with every IDR: keep the session then. New parameter sets (the
+                // encoder was rebuilt with another size or format on the same connection) need a new session: the old one
+                // cannot decode the new stream.
+                let numBytes = Int(alvr_get_decoder_config(nil))
+                var config = [UInt8](repeating: 0, count: max(numBytes, 0))
+                if numBytes > 0 {
+                    config.withUnsafeMutableBufferPointer { p in
+                        p.baseAddress!.withMemoryRebound(to: CChar.self, capacity: numBytes) { _ = alvr_get_decoder_config($0) }
                     }
-                    else {
-                        nalBuffer = UnsafeMutableBufferPointer<UInt8>.allocate(capacity: Int(1))
+                }
+                objc_sync_enter(frameQueueLock)
+                let haveSession = vtDecompressionSession != nil
+                let sameConfig = decoderConfigBytes == config
+                objc_sync_exit(frameQueueLock)
+                if !haveSession || !sameConfig {
+                    if haveSession {
+                        streamLog("decoder config changed (\(config.count) bytes): new decoder session")
                     }
-                    defer { nalBuffer?.deallocate() }
-                    alvr_get_decoder_config(nalBuffer?.baseAddress)
-
                     av1InstantiatedForReal = false
-                    (vtDecompressionSession, videoFormat) = VideoHandler.createVideoDecoder(initialNals: nalBuffer!, codec: currentCodec)
+                    installDecoder(config: config, codec: currentCodec)
+                    if haveSession {
+                        resetEncoding()
+                    }
                 }
 
                 EventHandler.shared.updateConnectionState(.connected)

@@ -51,3 +51,9 @@ Repository Guidelines
   `docs/FOV_CLIENT_CEILING.md`, `docs/FOV_GRID.md`); this README carries the summary and the release list.
 - Signing: every TestFlight run mints a certificate; on "maximum number of certificates" run the workflow with the revoke input ticked
   (`docs/TESTFLIGHT.md`).
+- Protocol harness (`tools/protocol-harness/README.md`): the real `EventHandler.swift` on Linux against a scripted streamer
+  and a render-loop model (`build.sh`, `run.sh [--tsan]`). Run it after any change to the event loop, `handleNals`, decoder
+  lifecycle or the render thread's frame pick; keep `Harness/DisplaySim.swift` in step with `Renderer.renderFrame`.
+- Shared stream state (decoder session + format + config bytes, frame queue, last shown frame, last submitted timestamp) is
+  read and written under `frameQueueLock` only; the render thread goes through `pollFrameForDisplay` / `publishShownFrame` /
+  `markSubmitted`. `[stream]` lines (`EventHandler.streamLog`) are rare transition events for the streamer's log, not per frame.
