@@ -49,7 +49,7 @@ jobs:
   testflight:
     name: Archive and upload
     if: ${{ inputs.existing_build == '' && inputs.invite_testers == '' }}
-    runs-on: macos-26   # standard image (Xcode 26.6, visionOS 26.5 SDK): the xcode-27 preview image stopped getting a machine on 2026-11-04
+    runs-on: macos-26-intel   # standard image (Xcode 26.6, visionOS 26.5 SDK); on 2026-11-04 neither the xcode-27 preview nor the arm64 macos-26 pool gave a machine (GitHub capacity)
     timeout-minutes: 90
     env:
       ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
