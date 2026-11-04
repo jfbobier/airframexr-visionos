@@ -61,20 +61,6 @@ struct GlobalSettings: Codable {
     }
 }
 
-extension GlobalSettings {
-    /// Tangent CEILING (left, right, up, down) for one eye, not a wearer's window: a generous per-edge box that covers the wearers measured so far
-    /// with about 2 degrees of margin (docs/FOV_CLIENT_CEILING.md in the AirFrameXR repo: the author's either-gaze 100 % box 1.03 / 0.74 / 0.71 / 0.62 and a
-    /// second wearer's following-gaze box 0.93 / 0.67 / 0.68 / 0.80). The per-person restriction lives on the PC (the streamer's Advanced window, the
-    /// profile button): the streamer can only go DOWN from what is declared here, so this box is what bounds it. The declare path circumscribes the
-    /// canted views, which multiplies these by about 1.017: the host sees about 1.05 / 0.80 / 0.76 / 0.87 (check config\airframexr_views.json).
-    /// Given as outer / inner / up / down; the right eye mirrors it, so outer and inner swap. Nothing is settable on the headset: a wearer who sees
-    /// black beyond an edge needs a larger constant here (a rebuild), one who sees less restricts on the PC.
-    static func visibleFovTangents(isLeftEye: Bool) -> simd_float4 {
-        let outerInnerUpDown = simd_float4(1.03, 0.79, 0.75, 0.86)
-        return isLeftEye ? outerInnerUpDown : simd_float4(outerInnerUpDown.y, outerInnerUpDown.x, outerInnerUpDown.z, outerInnerUpDown.w)
-    }
-}
-
 extension GlobalSettingsStore {
     static let sampleData: GlobalSettingsStore =
     GlobalSettingsStore()

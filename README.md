@@ -23,13 +23,11 @@ Everything below is in the `airframexr-client` branch on top of upstream `main`.
 **Picture**
 
 - Metal renderer only. The RealityKit renderer and its options are removed, so there is one code path to tune.
-- Field of view: the app declares a per-edge **ceiling** to the streamer (outer / inner / up / down tangents
-  1.03 / 0.79 / 0.75 / 0.86, about 1.05 / 0.80 / 0.76 / 0.87 once the canted views are circumscribed), a generous
-  box that covers the wearers measured so far with a margin. The wearer's own rectangle is set on the PC (the
-  streamer's Advanced window, or the Vision Pro profile the wizard applies: 0.97 / 0.71 / 0.69 / 0.63 in 1.2.0),
-  never on the headset; the streamer can only go down from the ceiling. Measurement and numbers:
-  `docs/AVP_FOV.md`, `docs/FOV_CALIBRATION.md` and `docs/FOV_CLIENT_CEILING.md` in the AirFrameXR repository.
-  The `calibration` branch is the same app with no ceiling at all, for the field-of-view sweep sessions.
+- Field of view: the app declares the frustum the compositor asks for, as the stock app does at FoV Scale 1, so an
+  uncalibrated wearer sees the whole panel. The wearer's own rectangle is set on the PC (the streamer's FOV card or
+  the Vision Pro profile, 0.97 / 0.71 / 0.69 / 0.63) and only changes what the game renders. 1.2.0 to 1.3.1 cut the
+  declared box to a fixed ceiling (1.03 / 0.79 / 0.75 / 0.86) instead: sharper, but black bars for wearers who see
+  past it. Measurement and numbers: `docs/AVP_FOV.md` and `docs/FOV_CALIBRATION.md` in the AirFrameXR repository.
 - The chroma key is taken from the streamer's settings (`video.passthrough`), so the key colour and distance are
   set once, on the PC. Keyed pixels are written transparent and everything the frame does not cover is black:
   you see the room between games (the streamer's idle colour) and around the desktop mirror's screen (its
@@ -74,6 +72,19 @@ Everything below is in the `airframexr-client` branch on top of upstream `main`.
 
 Same as upstream: see the [Building](https://github.com/alvr-org/alvr-visionos/wiki/Building) wiki page. The CI
 workflow files show the exact commands (Rust client core, cbindgen, `repack_alvr_client.sh`, then `xcodebuild`).
+
+## 1.3.2 (not built yet)
+
+- The fixed field-of-view ceiling is gone: the app declares the compositor's own frustum, as the stock app does at
+  FoV Scale 1. A tester saw black bars with the streamer's restriction off on 1.3.1 and none on the stock app: the
+  ceiling, measured on two wearers, was smaller than his view. Cost: the stream spreads over about twice the area
+  (left eye 1.79 / 1.02 / 1.22 / 1.02 against about 1.05 / 0.80 / 0.76 / 0.87), so about 1.4 times fewer pixels per
+  degree per axis, the stock app's sharpness. A calibrated wearer still gets the game restricted to the rectangle
+  (the streamer converts the absolute tangents against the new box); the sharpness comes back only when the
+  streamer can tell the app which box to declare (Next).
+- TEMPORARY `[ratemap]` lines in the streamer's log: the compositor's rasterization rate map sampled across each
+  eye, six times per connection, to see whether it falls to zero outside the lens window (Apple's own estimate of
+  the visible area, which would be a better automatic box). To remove once read.
 
 ## 1.3.1 (2026-11-02)
 
