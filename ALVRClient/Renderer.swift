@@ -662,7 +662,7 @@ class Renderer {
     /// A gaze-driven (dynamic) map would show its peak moving between lines.
     func logRateMapProbe(drawable: LayerRenderer.Drawable) {
         let now = CACurrentMediaTime()
-        guard rateMapLogCount < 6, now - lastRateMapLogTime > 20.0 else { return }
+        guard rateMapLogCount < 1, now - lastRateMapLogTime > 20.0 else { return }   // test build: one snapshot per declaration
         lastRateMapLogTime = now
         rateMapLogCount += 1
         guard let vrr = drawable.rasterizationRateMaps.first else {
@@ -694,6 +694,20 @@ class Renderer {
                               rateMapLogCount, layer, t.x, t.y, t.z, t.w, w, h, phys.width, phys.height, hs.joined(separator: " "), vs.joined(separator: " "))
             line.withCString { alvr_log(UInt8(ALVR_LOG_LEVEL_ERROR.rawValue), $0) }
         }
+    }
+
+    /// TEST BUILD (calibration-fov-slider): one `[fovtest]` line per view declaration into the streamer's log (logs\alvr.log, error level):
+    /// the slider value, the compositor's own frustum per eye (outer / inner / up / down tangents, before the slider), the IPD, the system
+    /// version and the device identifier. Together with the tester's "lowest value without a black edge" and "which edge darkens first".
+    func logFovTest(scale: Float, panelLeft: simd_float4, panelRight: simd_float4, ipd: Float) {
+        var sysinfo = utsname()
+        uname(&sysinfo)
+        let machine = withUnsafePointer(to: &sysinfo.machine) { $0.withMemoryRebound(to: CChar.self, capacity: 1) { String(cString: $0) } }
+        let os = ProcessInfo.processInfo.operatingSystemVersionString
+        // left eye: left = outer; right eye: right = outer
+        let line = String(format: "[fovtest] scale %.2f panel left eye o/i/u/d %.3f/%.3f/%.3f/%.3f right eye o/i/u/d %.3f/%.3f/%.3f/%.3f ipd %.1f mm device %@ visionOS %@",
+                          scale, panelLeft.x, panelLeft.y, panelLeft.z, panelLeft.w, panelRight.y, panelRight.x, panelRight.z, panelRight.w, ipd * 1000, machine, os)
+        line.withCString { alvr_log(UInt8(ALVR_LOG_LEVEL_ERROR.rawValue), $0) }
     }
 
     // Checks if eye tracking was secretly added, maybe, hard to know really.
@@ -855,8 +869,11 @@ class Renderer {
                 // wearer's fit and no visionOS API reports it (the render-context stencil mask covers the whole texture in full immersion),
                 // so the client never cuts: an uncalibrated wearer sees the whole panel. Tightening is the streamer's (the wearer's calibrated
                 // rectangle, sent to the game as absolute tangents). 1.2.0-1.3.1 cut to a fixed box and left black bars for wider fits.
-                let limitedTangentsLeft = tangentsLeft
-                let limitedTangentsRight = tangentsRight
+                // TEST BUILD (calibration-fov-slider): every edge scaled by the tester's slider, then one [fovtest] line for the streamer's log
+                let fovScale = Float(min(1.0, max(0.7, settings.fovTestScale)))
+                let limitedTangentsLeft = tangentsLeft * fovScale
+                let limitedTangentsRight = tangentsRight * fovScale
+                logFovTest(scale: fovScale, panelLeft: tangentsLeft, panelRight: tangentsRight, ipd: ipd)
                 let leftAngles = atan(limitedTangentsLeft)
                 let rightAngles = mainDrawable.views.count > 1 ? atan(limitedTangentsRight) : leftAngles
                 let leftFov = AlvrFov(left: -leftAngles.x, right: leftAngles.y, up: leftAngles.z, down: -leftAngles.w)

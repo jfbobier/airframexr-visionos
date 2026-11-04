@@ -98,6 +98,26 @@ struct Entry: View {
             .padding(.top)
 
             VStack {
+                // TEST BUILD (calibration-fov-slider, to revert)
+                HStack {
+                    Text("Field of view test")
+                    Spacer()
+                    Text(String(format: "%.2f", gStore.settings.fovTestScale))
+                }
+                Slider(value: $gStore.settings.fovTestScale, in: 0.70...1.00, step: 0.05) {
+                    Text("Field of view test")
+                }
+                .onChange(of: gStore.settings.fovTestScale) {
+                    saveAction()
+                }
+                Text("Lower it until you see a black edge, then report the last value without one and which edge went black first. Applies at the next connection.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal)
+            .padding(.top)
+
+            VStack {
                 Toggle(isOn: Binding(
                     get: { gStore.settings.chaperoneDistanceCm > 0 },
                     set: { gStore.settings.chaperoneDistanceCm = $0 ? 30 : 0; saveAction() }

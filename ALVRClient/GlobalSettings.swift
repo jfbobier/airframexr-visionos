@@ -26,6 +26,9 @@ struct GlobalSettings: Codable {
     var heightOffsetCm: Int = 0
     /// Enter the streamer as soon as the connection is up, without pressing Enter.
     var autoConnect: Bool = false
+    /// TEST BUILD (branch calibration-fov-slider, to revert): the share of the compositor's frustum declared to the streamer, every edge alike,
+    /// 0.70 to 1.00. Testers lower it until a black edge appears and report the last value without one.
+    var fovTestScale: Double = 1.0
     var targetHandsAtRoundtripLatency = false
     var showFaceTrackingDebug = false
     var lastUsedAppVersion = "never launched"
@@ -51,6 +54,7 @@ struct GlobalSettings: Codable {
         self.chromaKeyColorB = try container.decodeIfPresent(Float.self, forKey: .chromaKeyColorB) ?? self.chromaKeyColorB
         self.dismissWindowOnEnter = try container.decodeIfPresent(Bool.self, forKey: .dismissWindowOnEnter) ?? self.dismissWindowOnEnter
         self.heightOffsetCm = try container.decodeIfPresent(Int.self, forKey: .heightOffsetCm) ?? self.heightOffsetCm
+        self.fovTestScale = try container.decodeIfPresent(Double.self, forKey: .fovTestScale) ?? self.fovTestScale
         self.autoConnect = try container.decodeIfPresent(Bool.self, forKey: .autoConnect) ?? self.autoConnect
         self.targetHandsAtRoundtripLatency = try container.decodeIfPresent(Bool.self, forKey: .targetHandsAtRoundtripLatency) ?? self.targetHandsAtRoundtripLatency
         self.showFaceTrackingDebug = try container.decodeIfPresent(Bool.self, forKey: .showFaceTrackingDebug) ?? self.showFaceTrackingDebug

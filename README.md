@@ -1,5 +1,11 @@
 # AirFrameXR client for Apple Vision Pro
 
+> **Branch `calibration-fov-slider`: a TEST build, to be reverted.** On top of 1.3.2 it adds a "Field of view test" slider in the
+> main window (0.70 to 1.00 of the compositor's frustum, every edge alike, default 1.00, applied at the next connection) and writes one
+> `[fovtest]` line per connection into the streamer's `logs\alvr.log` (slider, the compositor's frustum per eye, IPD, device, visionOS)
+> plus one `[ratemap]` snapshot. Testers report the lowest value without a black edge and which edge went black first. Purpose:
+> data for a sharper default than the full frustum (AirFrameXR `docs/END_TO_END_FOV_DESIGN.md`).
+
 The visionOS client of [AirFrameXR](https://github.com/jfbobier/AirFrameXR), wireless PC VR for NVIDIA cards: the
 PC runs the game through AirFrameXR's OpenXR runtime (frame generation, foveated encoding, NVENC), streams it with
 the ALVR v20 protocol, and this app shows it on the Vision Pro with hand and PlayStation VR2 Sense controller
