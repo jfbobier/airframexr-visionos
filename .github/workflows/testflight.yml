@@ -49,7 +49,7 @@ jobs:
   testflight:
     name: Archive and upload
     if: ${{ inputs.existing_build == '' && inputs.invite_testers == '' }}
-    runs-on: macos-26   # standard arm64 image (Xcode 26.6, visionOS 26.5 SDK). Not the Intel pool: Xcode there has no visionOS platform (tried 2026-11-04). The xcode-27 preview image queues more often
+    runs-on: xcode-27   # needs the visionOS 27 SDK (GCControllerHomeButtonSettingsManager); the standard macos-26 image only has Xcode 26.6 (checked 2026-11-04)
     timeout-minutes: 90
     env:
       ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
