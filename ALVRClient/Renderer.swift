@@ -650,48 +650,21 @@ class Renderer {
         }
     }
     
-    var rateMapLogCount = 0
-    var lastRateMapLogTime: Double = 0.0
+    var projLogCount = 0
+    var lastDeclaredViewSerial = 0
 
-    /// TEMPORARY diagnostic (remove once read): does the compositor's rasterization rate map fall to near zero where no wearer can see?
-    /// If so it is Apple's own estimate of the lens window, a better automatic box than the full frustum. Writes `[ratemap]` lines into the
-    /// streamer's log (error level, the only level the streamer passes while streaming): right after each view declaration, then every 20 s,
-    /// six times per declaration. Per layer: the declared frustum's tangents (left/right/up/down), the screen and physical sizes, then the local
-    /// rate (physical pixels per screen pixel, 1 = full) at 17 points across the horizontal centre line (left to right) and the vertical one (top
-    /// to bottom). A screen fraction f maps to the tangent -left + f * (left + right) horizontally, up - f * (up + down) vertically.
-    /// A gaze-driven (dynamic) map would show its peak moving between lines.
-    func logRateMapProbe(drawable: LayerRenderer.Drawable) {
-        let now = CACurrentMediaTime()
-        guard rateMapLogCount < 6, now - lastRateMapLogTime > 20.0 else { return }
-        lastRateMapLogTime = now
-        rateMapLogCount += 1
-        guard let vrr = drawable.rasterizationRateMaps.first else {
-            "[ratemap] no rasterization rate map".withCString { alvr_log(UInt8(ALVR_LOG_LEVEL_ERROR.rawValue), $0) }
-            return
-        }
-        let w = Float(vrr.screenSize.width), h = Float(vrr.screenSize.height)
-        guard w > 0, h > 0 else { return }
-        let samples = 17
-        for layer in 0..<min(vrr.layerCount, drawable.views.count) {
-            let t = drawable.gimmeTangents(viewIndex: layer)
-            func rate(_ x: Float, _ y: Float, horizontal: Bool) -> Float {
-                let d: Float = horizontal ? w / 200 : h / 200
-                let a = horizontal ? MTLCoordinate2D(x: max(0, x - d), y: y) : MTLCoordinate2D(x: x, y: max(0, y - d))
-                let b = horizontal ? MTLCoordinate2D(x: min(w, x + d), y: y) : MTLCoordinate2D(x: x, y: min(h, y + d))
-                let pa = vrr.physicalCoordinates(screenCoordinates: a, layer: layer)
-                let pb = vrr.physicalCoordinates(screenCoordinates: b, layer: layer)
-                let span = horizontal ? (b.x - a.x) : (b.y - a.y)
-                return span > 0 ? (horizontal ? (pb.x - pa.x) : (pb.y - pa.y)) / span : 0
-            }
-            var hs: [String] = [], vs: [String] = []
-            for i in 0..<samples {
-                let f = (Float(i) + 0.5) / Float(samples)
-                hs.append(String(format: "%.2f", rate(f * w, h / 2, horizontal: true)))
-                vs.append(String(format: "%.2f", rate(w / 2, f * h, horizontal: false)))
-            }
-            let phys = vrr.physicalSize(layer: layer)
-            let line = String(format: "[ratemap] #%d layer %d tan %.3f/%.3f/%.3f/%.3f screen %.0fx%.0f phys %ldx%ld h: %@ v: %@",
-                              rateMapLogCount, layer, t.x, t.y, t.z, t.w, w, h, phys.width, phys.height, hs.joined(separator: " "), vs.joined(separator: " "))
+    /// Step 0 of docs/PICTURE_EDGES_DESIGN.md (the vertical orientation): the raw projection matrix of each eye, once per declaration, as a `[proj]`
+    /// line in the streamer's log (error level, the only level the streamer passes while streaming). The declared tangents (`[view]` is V) come from
+    /// `_extractFrustumTangents`, whose z / w the declaration sends as up / down. Read with the field of a known asymmetric up / down.
+    func logProjection(drawable: LayerRenderer.Drawable) {
+        guard projLogCount < 2 else { return }
+        projLogCount += 1
+        guard #available(visionOS 2.0, *) else { return }
+        for i in 0..<drawable.views.count {
+            let m = drawable.computeProjection(viewIndex: i)
+            let t = drawable.gimmeTangents(viewIndex: i)
+            let v = (0..<4).flatMap { c in (0..<4).map { r in String(format: "%.5f", m[c, r]) } }
+            let line = String(format: "[proj] eye %d tangents l/r/z/w %.4f/%.4f/%.4f/%.4f matrix(columns) %@", i, t.x, t.y, t.z, t.w, v.joined(separator: " "))
             line.withCString { alvr_log(UInt8(ALVR_LOG_LEVEL_ERROR.rawValue), $0) }
         }
     }
@@ -832,7 +805,11 @@ class Renderer {
             ipd = 0.063
             print(EventHandler.shared.lastIpd)
 #endif
-            if abs(EventHandler.shared.lastIpd - ipd) > 0.001 {
+            let viewSerial = EventHandler.shared.headsetViewSerial
+            if abs(EventHandler.shared.lastIpd - ipd) > 0.001 || lastDeclaredViewSerial != viewSerial {
+                lastDeclaredViewSerial = viewSerial
+                projLogCount = 0
+                logProjection(drawable: mainDrawable)
                 print("Send view config")
                 
                 if EventHandler.shared.lastIpd != -1 {
@@ -851,12 +828,12 @@ class Renderer {
                 let tangentsRight = mainDrawable.gimmeTangents(viewIndex: 1)
                 let transformLeft = mainDrawable.views[0].transform
                 let transformRight = mainDrawable.views[1].transform
-                // Declare the frustum the compositor asks for, per eye, as the stock app does at FoV Scale 1. The lens window depends on the
-                // wearer's fit and no visionOS API reports it (the render-context stencil mask covers the whole texture in full immersion),
-                // so the client never cuts: an uncalibrated wearer sees the whole panel. Tightening is the streamer's (the wearer's calibrated
-                // rectangle, sent to the game as absolute tangents). 1.2.0-1.3.1 cut to a fixed box and left black bars for wider fits.
-                let limitedTangentsLeft = tangentsLeft
-                let limitedTangentsRight = tangentsRight
+                // 1.4: declare min(P, V) per eye. P is the frustum the compositor asks for (what the stock app declares at FoV Scale 1); V is the headset view
+                // the streamer chose and sent at connection (`EventHandler.headsetViewTangents`: the wearer's fit plus its margin, or nothing = the whole
+                // panel). Nothing is tuned here: the client has no field-of-view setting; the PC owns the geometry.
+                let view = EventHandler.shared.headsetViewTangents
+                let limitedTangentsLeft = view.map { simd_min(tangentsLeft, $0[0]) } ?? tangentsLeft
+                let limitedTangentsRight = view.map { simd_min(tangentsRight, $0[1]) } ?? tangentsRight
                 let leftAngles = atan(limitedTangentsLeft)
                 let rightAngles = mainDrawable.views.count > 1 ? atan(limitedTangentsRight) : leftAngles
                 let leftFov = AlvrFov(left: -leftAngles.x, right: leftAngles.y, up: leftAngles.z, down: -leftAngles.w)
@@ -881,10 +858,7 @@ class Renderer {
                 
                 
                 WorldTracker.shared.sendViewParams(viewTransforms:  EventHandler.shared.viewTransforms, viewFovs: EventHandler.shared.viewFovs)
-                rateMapLogCount = 0
-                lastRateMapLogTime = 0
             }
-            logRateMapProbe(drawable: mainDrawable)
             
             var needsPipelineRebuild = false
             if EventHandler.shared.encodingGamma != encodingGamma {

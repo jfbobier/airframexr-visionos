@@ -150,6 +150,38 @@ class EventHandler: ObservableObject {
     var decoderRebuildPending = false
     var backgroundSince: Double = 0
     var lastIpd: Float = -1
+    /// AirFrameXR 1.4 (docs/PICTURE_EDGES_DESIGN.md section 8): the headset view V the streamer sent for this connection, per eye, in the order of the
+    /// compositor's tangents (left, right, up, down as declared). nil = none sent: the client declares the whole frustum P. The bump of the serial makes
+    /// the renderer declare again.
+    var headsetViewTangents: [simd_float4]? = nil
+    var headsetViewSerial = 0
+    private let headsetViewLock = NSLock()
+
+    /// `{"airframexr":1,"view":{"left":[outer,inner,upper,lower],"right":[...]}}` over ServerControlPacket::Reserved; anything else is ignored.
+    func applyReservedMessage(_ text: String) {
+        guard let data = text.data(using: .utf8),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              (root["airframexr"] as? NSNumber)?.intValue == 1 else { return }
+        var view: [simd_float4]? = nil
+        if let v = root["view"] as? [String: Any],
+           let l = (v["left"] as? [NSNumber])?.map({ $0.floatValue }), l.count == 4,
+           let r = (v["right"] as? [NSNumber])?.map({ $0.floatValue }), r.count == 4,
+           (l + r).allSatisfy({ $0.isFinite && $0 > 0 }) {
+            // the left eye's outer edge is its left one; the right eye's outer edge is its right one
+            view = [simd_float4(l[0], l[1], l[2], l[3]), simd_float4(r[1], r[0], r[2], r[3])]
+        }
+        setHeadsetView(view)
+        let desc = view.map { "L \($0[0]) R \($0[1])" } ?? "none"
+        "[view] headset view V: \(desc)".withCString { alvr_log(UInt8(ALVR_LOG_LEVEL_ERROR.rawValue), $0) }   // error level: the only level the streamer logs while streaming
+    }
+
+    func setHeadsetView(_ view: [simd_float4]?) {
+        headsetViewLock.lock(); defer { headsetViewLock.unlock() }
+        if view == nil && headsetViewTangents == nil { return }
+        if let a = view, let b = headsetViewTangents, a == b { return }
+        headsetViewTangents = view
+        headsetViewSerial += 1
+    }
     var viewTransforms: [simd_float4x4] = [matrix_identity_float4x4, matrix_identity_float4x4]
     var viewFovs: [AlvrFov] = [AlvrFov(left: -1.0471973, right: 0.7853982, up: 0.7853982, down: -0.8726632), AlvrFov(left: -0.7853982, right: 1.0471973, up: 0.7853982, down: -0.8726632)]
     var sentViewTangents: [simd_float4] = [simd_float4(1.73205, 1.0, 1.0, 1.19175), simd_float4(1.0, 1.73205, 1.0, 1.19175)]
@@ -958,6 +990,7 @@ class EventHandler: ObservableObject {
                 updateHostVersion()
                 numberOfEventThreadRestarts = 0
                 
+                setHeadsetView(nil)   // V is per connection: the streamer sends it again after this event
                 encodingGamma = alvrEvent.STREAMING_STARTED.encoding_gamma
                 enableHdr = alvrEvent.STREAMING_STARTED.enable_hdr
                 if !streamingActive {
@@ -976,6 +1009,7 @@ class EventHandler: ObservableObject {
                 Settings.clearSettingsCache()
             case ALVR_EVENT_STREAMING_STOPPED.rawValue:
                 print("streaming stopped")
+                setHeadsetView(nil)
                 if streamingActive {
                     streamingActive = false
                     stop()
@@ -1042,6 +1076,14 @@ class EventHandler: ObservableObject {
                 //WorldTracker.shared.needsRecenterTrigger = true
              case ALVR_EVENT_REAL_TIME_CONFIG.rawValue:
                 print("TODO real-time config")
+            case ALVR_EVENT_RESERVED_MESSAGE.rawValue:
+                let n = Int(alvr_reserved_message(nil))
+                if n > 1 {
+                    let buf = UnsafeMutablePointer<CChar>.allocate(capacity: n)
+                    alvr_reserved_message(buf)
+                    applyReservedMessage(String(cString: buf))
+                    buf.deallocate()
+                }
              default:
                  print("unknown msg")
              }

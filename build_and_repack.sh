@@ -19,6 +19,7 @@ cargo install cbindgen
 # Add iOS target 
 rustup target add aarch64-apple-ios
 
+sh scripts/apply-patches.sh
 rm -rf ALVR/target
 rm -rf ALVR/build
 rm -rf ALVR/alvr/server

@@ -23,11 +23,12 @@ Everything below is in the `airframexr-client` branch on top of upstream `main`.
 **Picture**
 
 - Metal renderer only. The RealityKit renderer and its options are removed, so there is one code path to tune.
-- Field of view: the app declares the frustum the compositor asks for, as the stock app does at FoV Scale 1, so an
-  uncalibrated wearer sees the whole panel. The wearer's own rectangle is set on the PC (the streamer's FOV card or
-  the Vision Pro profile, 0.97 / 0.71 / 0.69 / 0.63) and only changes what the game renders. 1.2.0 to 1.3.1 cut the
-  declared box to a fixed ceiling (1.03 / 0.79 / 0.75 / 0.86) instead: sharper, but black bars for wearers who see
-  past it. Measurement and numbers: `docs/AVP_FOV.md` and `docs/FOV_CALIBRATION.md` in the AirFrameXR repository.
+- Field of view (1.4): nothing is tuned on the headset. The app declares min(P, V) per eye: P is the frustum the
+  compositor asks for (what the stock app declares at FoV Scale 1), V is the headset view the streamer sends at
+  connection (a text line over `ServerControlPacket::Reserved`, `{"airframexr":1,"view":{"left":[outer,inner,upper,lower],
+  "right":[...]}}`: the wearer's fit plus a margin, chosen on the PC). Without the message, P: the whole panel, no
+  black bars. There is no field-of-view slider or menu in the app. The streamer's picture-edges card and fit tool,
+  and the numbers: `docs/PICTURE_EDGES_DESIGN.md` in the AirFrameXR repository.
 - The chroma key is taken from the streamer's settings (`video.passthrough`), so the key colour and distance are
   set once, on the PC. Keyed pixels are written transparent and everything the frame does not cover is black:
   you see the room between games (the streamer's idle colour) and around the desktop mirror's screen (its
@@ -72,6 +73,19 @@ Everything below is in the `airframexr-client` branch on top of upstream `main`.
 
 Same as upstream: see the [Building](https://github.com/alvr-org/alvr-visionos/wiki/Building) wiki page. The CI
 workflow files show the exact commands (Rust client core, cbindgen, `repack_alvr_client.sh`, then `xcodebuild`).
+
+## 1.4.0 (branch `1.4`, not built when written)
+
+- The streamer's headset view V (Reserved message) is read and declared per eye as min(P, V); a new message or a new
+  connection declares again. `patches/alvr-reserved-message.patch` makes the pinned ALVR `client_core` hand the text
+  to the app (`ALVR_EVENT_RESERVED_MESSAGE`, `alvr_reserved_message`); `scripts/apply-patches.sh` applies it before the
+  Rust build, in both workflows and `build_and_repack.sh`.
+- The temporary `[ratemap]` log lines are gone. Step 0 of the plan adds `[proj]` lines instead: the raw projection
+  matrix of each eye at every declaration, to settle whether the declared up and down are swapped (the code sends
+  the bottom tangent as `up`; unconfirmed on a headset, nothing was changed).
+- Linux protocol harness: scenario `headset_view` (the real `EventHandler.swift`: parse, per connection, ignored
+  text); the transition scenarios unchanged.
+- Not tested on a headset. Compiled in CI only.
 
 ## 1.3.2 (not built yet)
 

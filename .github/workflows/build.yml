@@ -51,6 +51,7 @@ jobs:
       - name: Build client core and xcframework
         run: |
           unset SDKROOT
+          sh scripts/apply-patches.sh
           rm -rf ALVR/build ALVR/alvr/server
           CARGO_TARGET_DIR=ALVR/target cargo build --manifest-path ALVR/Cargo.toml \
             --target=aarch64-apple-ios -p alvr_client_core --profile distribution

@@ -29,6 +29,10 @@ enum Phase {
     case enterImmersive
     /// the decoder session dies under the client (VideoToolbox returns kVTInvalidSessionErr, as after a pause)
     case invalidateDecoder
+    /// the streamer sends the Reserved text (the headset view V) over the control channel
+    case sendReserved(String)
+    /// the client must hold exactly this V now (left eye then right eye tangents in declaration order, nil = none): a mismatch is a failure
+    case expectView([Float]?, String)
     /// every decode fails until the connection is rebuilt (positive control for the client's reconnect rule)
     case breakDecoder
 }
@@ -47,6 +51,11 @@ struct Scenario {
 }
 
 let game90 = Phase.game(seconds: 6, fps: 90)
+nonisolated(unsafe) var viewFailures: [String] = []   // expectView mismatches, reported with the verdict
+// the AirFrameXR headset view message (docs/PICTURE_EDGES_DESIGN.md section 8): left eye outer / inner / upper / lower, right eye the same
+let viewMsg = "{\"airframexr\":1,\"view\":{\"left\":[1.5,0.8,1.0,0.9],\"right\":[1.4,0.7,1.0,0.9]}}"
+// the client's order per eye is (left, right, up, down): the left eye's outer edge is its left one, the right eye's outer edge its right one
+let viewLeftRight: [Float] = [1.5, 0.8, 1.0, 0.9, 0.7, 1.4, 1.0, 0.9]
 
 let scenarios: [Scenario] = [
     Scenario(name: "cold_idle_to_game", about: "headset waits, stream starts on the idle frame, a game starts",
@@ -77,6 +86,17 @@ let scenarios: [Scenario] = [
              phases: [game90, .invalidateDecoder, .game(seconds: 8, fps: 90)]),
     Scenario(name: "decoder_broken", about: "frames arrive but never decode: the client must reconnect once (control)",
              phases: [game90, .breakDecoder, .game(seconds: 36, fps: 90)], settleWindow: 0, maxReconnects: 1, minReconnects: 1),
+    Scenario(name: "headset_view", about: "the streamer's V message: parsed, kept per connection, dropped at a restart, ignored when it is not ours",
+             phases: [.idle(seconds: 2), .expectView(nil, "before any message"),
+                      .sendReserved("not json"), .expectView(nil, "text that is not ours"),
+                      .sendReserved("{\"other\":1}"), .expectView(nil, "json without the airframexr tag"),
+                      .sendReserved(viewMsg), .expectView(viewLeftRight, "after the V message"),
+                      .sendReserved("{\"airframexr\":1,\"view\":{\"left\":[1.5,0.8,1.0],\"right\":[1,1,1,1]}}"), .expectView(nil, "a view with three numbers"),
+                      .sendReserved(viewMsg), .expectView(viewLeftRight, "V again"),
+                      .restart(gapSeconds: 0.5), .idle(seconds: 2), .expectView(nil, "V does not survive a new connection"),
+                      .sendReserved(viewMsg), .expectView(viewLeftRight, "V of the new connection"),
+                      .sendReserved("{\"airframexr\":1}"), .expectView(nil, "the host turned V off"),
+                      .game(seconds: 6, fps: 90)]),
     Scenario(name: "background_blip", about: "visionOS reports background for 0.3 s mid-stream",
              phases: [game90, .background(seconds: 0.3), game90]),
     Scenario(name: "background_real", about: "the wearer leaves the app: background for 3 s (the client must exit)",
@@ -137,6 +157,13 @@ final class Host: @unchecked Sendable {
         case .breakDecoder:
             HarnessLog.shared.event("phase", ["kind": "break_decoder"])
             HarnessDecoder.broken = true
+        case .sendReserved(let text):
+            HarnessLog.shared.event("phase", ["kind": "reserved"])
+            FakeCore.shared.reserved(text)
+        case .expectView(let want, let what):
+            sleep(0.4)
+            let got = EventHandler.shared.headsetViewTangents.map { $0.flatMap { [$0.x, $0.y, $0.z, $0.w] } }
+            if got != want { viewFailures.append("\(what): the client holds V \(got.map { "\($0)" } ?? "nil"), expected \(want.map { "\($0)" } ?? "nil")") }
         case .invalidateDecoder:
             HarnessLog.shared.event("phase", ["kind": "invalidate_decoder"])
             objc_sync_enter(EventHandler.shared.frameQueueLock)
@@ -218,6 +245,7 @@ func evaluate(_ sc: Scenario, lastPhaseStart: Double, end: Double) -> Verdict {
 
         fails.append("the client tore the connection down \(Int(m["reconnects"]!)) time(s) (fatal decoder error)")
     }
+    fails.append(contentsOf: viewFailures)
     return Verdict(scenario: sc.name, pass: fails.isEmpty, failures: fails, metrics: m, clientLines: clientLines, harnessEvents: events)
 }
 
