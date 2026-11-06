@@ -98,6 +98,22 @@ struct Entry: View {
             .padding(.top)
 
             VStack {
+                Text(String(format: "FoV Scale: %.2f", gStore.settings.fovRenderScale))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Slider(value: $gStore.settings.fovRenderScale, in: 0.7...1.0, step: 0.05) {
+                    Text("FoV Scale")
+                }
+                .onChange(of: gStore.settings.fovRenderScale) {
+                    saveAction()
+                }
+                Text("Multiplies the field of view the app declares, on every edge. 1.00 is the whole frustum the headset asks for (the stock app). Less angle for the same stream: denser pixels and a cheaper game, but the picture ends sooner at the edges. Reconnect after changing.")
+                    .font(.system(size: 10))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.horizontal)
+            .padding(.top)
+
+            VStack {
                 Toggle(isOn: Binding(
                     get: { gStore.settings.chaperoneDistanceCm > 0 },
                     set: { gStore.settings.chaperoneDistanceCm = $0 ? 30 : 0; saveAction() }

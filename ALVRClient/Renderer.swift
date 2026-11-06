@@ -650,52 +650,6 @@ class Renderer {
         }
     }
     
-    var rateMapLogCount = 0
-    var lastRateMapLogTime: Double = 0.0
-
-    /// TEMPORARY diagnostic (remove once read): does the compositor's rasterization rate map fall to near zero where no wearer can see?
-    /// If so it is Apple's own estimate of the lens window, a better automatic box than the full frustum. Writes `[ratemap]` lines into the
-    /// streamer's log (error level, the only level the streamer passes while streaming): right after each view declaration, then every 20 s,
-    /// six times per declaration. Per layer: the declared frustum's tangents (left/right/up/down), the screen and physical sizes, then the local
-    /// rate (physical pixels per screen pixel, 1 = full) at 17 points across the horizontal centre line (left to right) and the vertical one (top
-    /// to bottom). A screen fraction f maps to the tangent -left + f * (left + right) horizontally, up - f * (up + down) vertically.
-    /// A gaze-driven (dynamic) map would show its peak moving between lines.
-    func logRateMapProbe(drawable: LayerRenderer.Drawable) {
-        let now = CACurrentMediaTime()
-        guard rateMapLogCount < 6, now - lastRateMapLogTime > 20.0 else { return }
-        lastRateMapLogTime = now
-        rateMapLogCount += 1
-        guard let vrr = drawable.rasterizationRateMaps.first else {
-            "[ratemap] no rasterization rate map".withCString { alvr_log(UInt8(ALVR_LOG_LEVEL_ERROR.rawValue), $0) }
-            return
-        }
-        let w = Float(vrr.screenSize.width), h = Float(vrr.screenSize.height)
-        guard w > 0, h > 0 else { return }
-        let samples = 17
-        for layer in 0..<min(vrr.layerCount, drawable.views.count) {
-            let t = drawable.gimmeTangents(viewIndex: layer)
-            func rate(_ x: Float, _ y: Float, horizontal: Bool) -> Float {
-                let d: Float = horizontal ? w / 200 : h / 200
-                let a = horizontal ? MTLCoordinate2D(x: max(0, x - d), y: y) : MTLCoordinate2D(x: x, y: max(0, y - d))
-                let b = horizontal ? MTLCoordinate2D(x: min(w, x + d), y: y) : MTLCoordinate2D(x: x, y: min(h, y + d))
-                let pa = vrr.physicalCoordinates(screenCoordinates: a, layer: layer)
-                let pb = vrr.physicalCoordinates(screenCoordinates: b, layer: layer)
-                let span = horizontal ? (b.x - a.x) : (b.y - a.y)
-                return span > 0 ? (horizontal ? (pb.x - pa.x) : (pb.y - pa.y)) / span : 0
-            }
-            var hs: [String] = [], vs: [String] = []
-            for i in 0..<samples {
-                let f = (Float(i) + 0.5) / Float(samples)
-                hs.append(String(format: "%.2f", rate(f * w, h / 2, horizontal: true)))
-                vs.append(String(format: "%.2f", rate(w / 2, f * h, horizontal: false)))
-            }
-            let phys = vrr.physicalSize(layer: layer)
-            let line = String(format: "[ratemap] #%d layer %d tan %.3f/%.3f/%.3f/%.3f screen %.0fx%.0f phys %ldx%ld h: %@ v: %@",
-                              rateMapLogCount, layer, t.x, t.y, t.z, t.w, w, h, phys.width, phys.height, hs.joined(separator: " "), vs.joined(separator: " "))
-            line.withCString { alvr_log(UInt8(ALVR_LOG_LEVEL_ERROR.rawValue), $0) }
-        }
-    }
-
     // Checks if eye tracking was secretly added, maybe, hard to know really.
     func checkEyes(drawable: LayerRenderer.Drawable) {
         print("begin -----")
@@ -857,8 +811,11 @@ class Renderer {
                 // rectangle, sent to the game as absolute tangents). 1.2.0-1.3.1 cut to a fixed box and left black bars for wider fits.
                 let limitedTangentsLeft = tangentsLeft
                 let limitedTangentsRight = tangentsRight
-                let leftAngles = atan(limitedTangentsLeft)
-                let rightAngles = mainDrawable.views.count > 1 ? atan(limitedTangentsRight) : leftAngles
+                // FoV Scale (the slider in the app, 0.7 to 1.0): a uniform factor on what is declared, so the streamer renders, encodes and sends less angle at the same
+                // pixel count (denser). 1.0 = the compositor's whole frustum, as the stock app. Taken at the next connection.
+                let fovScale = max(0.5, min(1.0, settings.fovRenderScale))
+                let leftAngles = atan(limitedTangentsLeft * fovScale)
+                let rightAngles = mainDrawable.views.count > 1 ? atan(limitedTangentsRight * fovScale) : leftAngles
                 let leftFov = AlvrFov(left: -leftAngles.x, right: leftAngles.y, up: leftAngles.z, down: -leftAngles.w)
                 let rightFov = AlvrFov(left: -rightAngles.x, right: rightAngles.y, up: rightAngles.z, down: -rightAngles.w)
                 
@@ -881,10 +838,7 @@ class Renderer {
                 
                 
                 WorldTracker.shared.sendViewParams(viewTransforms:  EventHandler.shared.viewTransforms, viewFovs: EventHandler.shared.viewFovs)
-                rateMapLogCount = 0
-                lastRateMapLogTime = 0
             }
-            logRateMapProbe(drawable: mainDrawable)
             
             var needsPipelineRebuild = false
             if EventHandler.shared.encodingGamma != encodingGamma {

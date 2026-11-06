@@ -26,6 +26,8 @@ struct GlobalSettings: Codable {
     var heightOffsetCm: Int = 0
     /// Enter the streamer as soon as the connection is up, without pressing Enter.
     var autoConnect: Bool = false
+    /// FoV Scale: a uniform factor (0.7 to 1.0) on the field of view declared to the streamer; 1.0 = the compositor's whole frustum.
+    var fovRenderScale: Float = 1.0
     var targetHandsAtRoundtripLatency = false
     var showFaceTrackingDebug = false
     var lastUsedAppVersion = "never launched"
@@ -52,6 +54,7 @@ struct GlobalSettings: Codable {
         self.dismissWindowOnEnter = try container.decodeIfPresent(Bool.self, forKey: .dismissWindowOnEnter) ?? self.dismissWindowOnEnter
         self.heightOffsetCm = try container.decodeIfPresent(Int.self, forKey: .heightOffsetCm) ?? self.heightOffsetCm
         self.autoConnect = try container.decodeIfPresent(Bool.self, forKey: .autoConnect) ?? self.autoConnect
+        self.fovRenderScale = try container.decodeIfPresent(Float.self, forKey: .fovRenderScale) ?? self.fovRenderScale
         self.targetHandsAtRoundtripLatency = try container.decodeIfPresent(Bool.self, forKey: .targetHandsAtRoundtripLatency) ?? self.targetHandsAtRoundtripLatency
         self.showFaceTrackingDebug = try container.decodeIfPresent(Bool.self, forKey: .showFaceTrackingDebug) ?? self.showFaceTrackingDebug
         self.lastUsedAppVersion = try container.decodeIfPresent(String.self, forKey: .lastUsedAppVersion) ?? self.lastUsedAppVersion

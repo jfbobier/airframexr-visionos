@@ -28,6 +28,8 @@ Everything below is in the `airframexr-client` branch on top of upstream `main`.
   the Vision Pro profile, 0.97 / 0.71 / 0.69 / 0.63) and only changes what the game renders. 1.2.0 to 1.3.1 cut the
   declared box to a fixed ceiling (1.03 / 0.79 / 0.75 / 0.86) instead: sharper, but black bars for wearers who see
   past it. Measurement and numbers: `docs/AVP_FOV.md` and `docs/FOV_CALIBRATION.md` in the AirFrameXR repository.
+  The **FoV Scale** slider (0.70 to 1.00, in the app) shrinks the declared box uniformly: less angle for the same stream
+  (denser pixels, a cheaper game) at the price of the edges; 1.00 is the stock app. It takes effect at the next connection.
 - The chroma key is taken from the streamer's settings (`video.passthrough`), so the key colour and distance are
   set once, on the PC. Keyed pixels are written transparent and everything the frame does not cover is black:
   you see the room between games (the streamer's idle colour) and around the desktop mirror's screen (its
@@ -73,6 +75,15 @@ Everything below is in the `airframexr-client` branch on top of upstream `main`.
 Same as upstream: see the [Building](https://github.com/alvr-org/alvr-visionos/wiki/Building) wiki page. The CI
 workflow files show the exact commands (Rust client core, cbindgen, `repack_alvr_client.sh`, then `xcodebuild`).
 
+## 1.3.5
+
+- The **FoV Scale** slider is back (0.70 to 1.00, 0.05 steps, 1.00 = the compositor's whole frustum), on top of the declared
+  frustum: a user who likes a tighter, sharper stream can pick it without any calibration; the PC-side restriction is a
+  separate control (it only changes what the game renders). The slider never goes above Apple's frustum (the 1.1 of the
+  old build asked for more angle than the headset has).
+- The temporary `[ratemap]` probe of 1.3.2 is removed: no diagnostic lines are written into the streamer's log any more.
+- Version aligned with the AirFrameXR 1.3.5 PC package.
+
 ## 1.3.2 (not built yet)
 
 - The fixed field-of-view ceiling is gone: the app declares the compositor's own frustum, as the stock app does at
@@ -82,9 +93,8 @@ workflow files show the exact commands (Rust client core, cbindgen, `repack_alvr
   degree per axis, the stock app's sharpness. A calibrated wearer still gets the game restricted to the rectangle
   (the streamer converts the absolute tangents against the new box); the sharpness comes back only when the
   streamer can tell the app which box to declare (Next).
-- TEMPORARY `[ratemap]` lines in the streamer's log: the compositor's rasterization rate map sampled across each
-  eye, six times per connection, to see whether it falls to zero outside the lens window (Apple's own estimate of
-  the visible area, which would be a better automatic box). To remove once read.
+- (Removed in 1.3.5) TEMPORARY `[ratemap]` lines in the streamer's log, the compositor's rasterization rate map sampled
+  across each eye.
 
 ## 1.3.1 (2026-11-02)
 
