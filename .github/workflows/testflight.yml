@@ -419,7 +419,7 @@ jobs:
           print(f"current: {E['MARKETING_VERSION']} ({newest['attributes']['version']})")
           for g in call("GET", f"/v1/apps/{app_id}/betaGroups?limit=200")["data"]:
               if g["attributes"].get("isInternalGroup"):
-                  call("POST", f"/v1/betaGroups/{g['id']}/relationships/builds", {"data": [{"type": "builds", "id": newest["id"]}]}, ok_errors=(409,))
+                  call("POST", f"/v1/betaGroups/{g['id']}/relationships/builds", {"data": [{"type": "builds", "id": newest["id"]}]}, ok_errors=(409, 422))
                   print("added to internal group", g["attributes"]["name"])
           print("builds still installable:")
           allb = call("GET", f"/v1/builds?filter[app]={app_id}&include=preReleaseVersion&sort=-uploadedDate&limit=30")
