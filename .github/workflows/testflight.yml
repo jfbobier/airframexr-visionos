@@ -33,6 +33,9 @@ on:
       public_group_name:
         description: "Name of the external TestFlight group that carries the public link (created if missing)"
         default: "Public"
+      expire_versions:
+        description: "Marketing versions whose builds are expired in TestFlight, separated by ',' (e.g. 1.4). Only this runs: no build. Then the newest valid build of marketing_version (or existing_build) is added to the internal groups, and the builds testers can install are listed"
+        default: ""
       revoke_ci_certificates:
         description: "First revoke the certificates earlier runs created on the team ('Created via API'): tick when signing says the account has reached the maximum number of certificates"
         type: boolean
@@ -48,7 +51,7 @@ concurrency:
 jobs:
   testflight:
     name: Archive and upload
-    if: ${{ inputs.existing_build == '' && inputs.invite_testers == '' }}
+    if: ${{ inputs.existing_build == '' && inputs.invite_testers == '' && inputs.expire_versions == '' }}
     runs-on: xcode-27   # needs the visionOS 27 SDK (GCControllerHomeButtonSettingsManager); the standard macos-26 image only has Xcode 26.6 (checked 2026-11-04)
     timeout-minutes: 90
     env:
@@ -352,6 +355,79 @@ jobs:
           print(f"PUBLIC LINK: {link}")
           with open(E["GITHUB_STEP_SUMMARY"], "a") as f:
               f.write(f"### TestFlight public link\n\n{link}\n\nBeta App Review: {state}. The link installs the build once Apple has approved it (first build of a version).\n")
+          PY
+
+  expire-builds:
+    name: Expire builds
+    if: ${{ inputs.expire_versions != '' && !inputs.unsigned_check }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+      BUNDLE_ID: ${{ vars.BUNDLE_ID }}
+      EXPIRE_VERSIONS: ${{ inputs.expire_versions }}
+      MARKETING_VERSION: ${{ inputs.marketing_version }}
+      BUILD_NUMBER: ${{ inputs.existing_build }}
+    steps:
+      - name: Expire the listed versions, publish the current one
+        run: |
+          mkdir -p "$RUNNER_TEMP/asc"
+          printf '%s\n' "$ASC_KEY_P8" > "$RUNNER_TEMP/asc/key.p8"
+          export ASC_KEY_PATH="$RUNNER_TEMP/asc/key.p8"
+          python3 -m pip install --quiet --disable-pip-version-check --break-system-packages pyjwt cryptography
+          python3 - <<'PY'
+          import json, os, sys, time, urllib.error, urllib.parse, urllib.request, jwt
+          E = os.environ
+          key = open(E["ASC_KEY_PATH"]).read()
+          def call(method, path, body=None, ok_errors=()):
+              tok = jwt.encode({"iss": E["ASC_ISSUER_ID"], "iat": int(time.time()), "exp": int(time.time()) + 600, "aud": "appstoreconnect-v1"}, key, algorithm="ES256", headers={"kid": E["ASC_KEY_ID"]})
+              url = path if path.startswith("http") else "https://api.appstoreconnect.apple.com" + path
+              req = urllib.request.Request(url, data=json.dumps(body).encode() if body is not None else None, method=method, headers={"Authorization": "Bearer " + tok, "Content-Type": "application/json"})
+              try:
+                  with urllib.request.urlopen(req) as r:
+                      raw = r.read()
+                      return json.loads(raw) if raw else {}
+              except urllib.error.HTTPError as e:
+                  detail = e.read().decode()[:1200]
+                  if e.code in ok_errors:
+                      print(f"::warning::{method} {path} -> {e.code}: {detail}")
+                      return None
+                  print(f"::error::{method} {path} -> {e.code}: {detail}")
+                  sys.exit(1)
+          q = urllib.parse.quote
+          app_id = call("GET", f"/v1/apps?filter[bundleId]={q(E['BUNDLE_ID'])}")["data"][0]["id"]
+          def builds(version):
+              return call("GET", f"/v1/builds?filter[app]={app_id}&filter[preReleaseVersion.version]={q(version)}&limit=200")["data"]
+          for v in [x.strip() for x in E["EXPIRE_VERSIONS"].split(",") if x.strip()]:
+              if v == E["MARKETING_VERSION"]:
+                  print(f"::error::refusing to expire the current version {v}"); sys.exit(1)
+              for b in builds(v):
+                  a = b["attributes"]
+                  if a.get("expired"):
+                      print(f"{v} ({a['version']}): already expired"); continue
+                  call("PATCH", f"/v1/builds/{b['id']}", {"data": {"type": "builds", "id": b["id"], "attributes": {"expired": True}}})
+                  print(f"{v} ({a['version']}): expired")
+          cur = [b for b in builds(E["MARKETING_VERSION"]) if b["attributes"].get("processingState") == "VALID" and not b["attributes"].get("expired")]
+          if E.get("BUILD_NUMBER"):
+              cur = [b for b in cur if b["attributes"]["version"] == E["BUILD_NUMBER"]]
+          if not cur:
+              print(f"::error::no valid {E['MARKETING_VERSION']} build (still processing?)"); sys.exit(1)
+          cur.sort(key=lambda b: int(b["attributes"]["version"]))
+          newest = cur[-1]
+          print(f"current: {E['MARKETING_VERSION']} ({newest['attributes']['version']})")
+          for g in call("GET", f"/v1/apps/{app_id}/betaGroups?limit=200")["data"]:
+              if g["attributes"].get("isInternalGroup"):
+                  call("POST", f"/v1/betaGroups/{g['id']}/relationships/builds", {"data": [{"type": "builds", "id": newest["id"]}]}, ok_errors=(409,))
+                  print("added to internal group", g["attributes"]["name"])
+          print("builds still installable:")
+          allb = call("GET", f"/v1/builds?filter[app]={app_id}&include=preReleaseVersion&sort=-uploadedDate&limit=30")
+          pv = {i["id"]: i["attributes"]["version"] for i in allb.get("included", []) if i["type"] == "preReleaseVersions"}
+          for b in allb["data"]:
+              a = b["attributes"]
+              if not a.get("expired"):
+                  print(" ", pv.get(b["relationships"]["preReleaseVersion"]["data"]["id"]), f"({a['version']})", a.get("processingState"))
           PY
 
   invite-testers:
