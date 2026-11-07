@@ -75,9 +75,14 @@ Everything below is in the `airframexr-client` branch on top of upstream `main`.
 Same as upstream: see the [Building](https://github.com/alvr-org/alvr-visionos/wiki/Building) wiki page. The CI
 workflow files show the exact commands (Rust client core, cbindgen, `repack_alvr_client.sh`, then `xcodebuild`).
 
-## 1.3.5
+## 1.3.6
 
-- The encoding gamma the app asks the streamer for is now **1.2** (was 1.5), the value reported as the best for the Vision Pro; the app decodes with whatever the streamer negotiates, so a streamer that overrides it still wins. (Committed after the TestFlight build 1.3.5: it is in the next build.)
+- Aligned with the AirFrameXR 1.3.6 PC package; this is the first build that carries everything below. `airframexr-client` is the
+  release branch (the 1.4 line is retired: no streamer-driven view, the app keeps the FoV Scale slider).
+- The encoding gamma the app asks the streamer for is now **1.2** (was 1.5), the value reported as the best for the Vision Pro; the app decodes with whatever the streamer negotiates, so a streamer that overrides it still wins. (Was committed after TestFlight build 1.3.5.)
+- The **FoV Scale** slider (below, from 1.3.5) is in this build.
+
+## 1.3.5
 
 - The **FoV Scale** slider is back (0.70 to 1.00, 0.05 steps, 1.00 = the compositor's whole frustum), on top of the declared
   frustum: a user who likes a tighter, sharper stream can pick it without any calibration; the PC-side restriction is a
