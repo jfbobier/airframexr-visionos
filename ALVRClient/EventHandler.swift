@@ -183,6 +183,9 @@ class EventHandler: ObservableObject {
     var lastStutterTime = 0.0
     var audioIsOff = false
     var needsEncoderReset = true
+    /// The encoding gamma the app asks the streamer for at the handshake (ALVR uses it unless the server overrides it; the app then decodes with whatever was negotiated, `encodingGamma`).
+    /// 1.2 is the value AVP users report as the best (1.5 up to 1.3.5); the PC side keeps its own display gamma on top, independent of this one.
+    static let preferredEncodingGamma: Float = 1.2
     var encodingGamma: Float = 1.0
     var enableHdr = false
     
@@ -202,7 +205,7 @@ class EventHandler: ObservableObject {
 
             // The rates pointer must stay valid until alvr_initialize has copied it (a temporary array pointer does not)
             refreshRates.withUnsafeBufferPointer { rates in
-                let capabilities = AlvrClientCapabilities(default_view_width: UInt32(renderWidth*2), default_view_height: UInt32(renderHeight*2), refresh_rates: rates.baseAddress, refresh_rates_count: UInt64(rates.count), foveated_encoding: true, encoder_high_profile: true, encoder_10_bits: true, encoder_av1: VTIsHardwareDecodeSupported(kCMVideoCodecType_AV1), prefer_10bit: true, prefer_full_range: true, preferred_encoding_gamma: 1.5, prefer_hdr: false)
+                let capabilities = AlvrClientCapabilities(default_view_width: UInt32(renderWidth*2), default_view_height: UInt32(renderHeight*2), refresh_rates: rates.baseAddress, refresh_rates_count: UInt64(rates.count), foveated_encoding: true, encoder_high_profile: true, encoder_10_bits: true, encoder_av1: VTIsHardwareDecodeSupported(kCMVideoCodecType_AV1), prefer_10bit: true, prefer_full_range: true, preferred_encoding_gamma: EventHandler.preferredEncodingGamma, prefer_hdr: false)
                 alvr_initialize(/*capabilities=*/capabilities)
             }
             alvr_initialize_logging()

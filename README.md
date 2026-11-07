@@ -77,6 +77,8 @@ workflow files show the exact commands (Rust client core, cbindgen, `repack_alvr
 
 ## 1.3.5
 
+- The encoding gamma the app asks the streamer for is now **1.2** (was 1.5), the value reported as the best for the Vision Pro; the app decodes with whatever the streamer negotiates, so a streamer that overrides it still wins. (Committed after the TestFlight build 1.3.5: it is in the next build.)
+
 - The **FoV Scale** slider is back (0.70 to 1.00, 0.05 steps, 1.00 = the compositor's whole frustum), on top of the declared
   frustum: a user who likes a tighter, sharper stream can pick it without any calibration; the PC-side restriction is a
   separate control (it only changes what the game renders). The slider never goes above Apple's frustum (the 1.1 of the
