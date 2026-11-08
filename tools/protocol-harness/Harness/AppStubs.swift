@@ -101,16 +101,6 @@ final class InputDebugSession {
     func resume() {}
 }
 
-struct HarnessSettings { var showPerformanceHud = false }
-final class HarnessStore { var settings = HarnessSettings() }
-enum ALVRClientApp { nonisolated(unsafe) static let gStore = HarnessStore() }
-
-final class PerformanceTracker {
-    nonisolated(unsafe) static let shared = PerformanceTracker()
-    func recordReceive(timestampNs: UInt64) {}
-    func recordDecodeEnd(timestampNs: UInt64) {}
-}
-
 enum Settings { static func clearSettingsCache() {} }
 
 // MARK: - VideoHandler (decoder stand-in)

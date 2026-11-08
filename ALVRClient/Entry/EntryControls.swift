@@ -27,12 +27,14 @@ struct EntryControls: View {
                 Toggle(isOn: $model.isShowingClient) {
                     Label("Enter", systemImage: "visionpro")
                         .labelStyle(.titleAndIcon)
-                        .padding(15)
+                        .padding(.horizontal, 40)
+                        .padding(.vertical, 22)
                 }
             } else {
                 Label("Connecting...", systemImage: "visionpro")
                     .labelStyle(.titleOnly)
-                    .padding(15)
+                    .padding(.horizontal, 40)
+                    .padding(.vertical, 22)
             }
             
         }

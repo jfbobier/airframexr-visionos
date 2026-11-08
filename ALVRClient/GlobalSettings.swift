@@ -26,15 +26,20 @@ struct GlobalSettings: Codable {
     var heightOffsetCm: Int = 0
     /// Enter the streamer as soon as the connection is up, without pressing Enter.
     var autoConnect: Bool = false
-    /// FoV Scale: a uniform factor (0.7 to 1.0) on the field of view declared to the streamer; 1.0 = the compositor's whole frustum.
-    var fovRenderScale: Float = 1.0
+    /// FoV scale per axis (0.6 to 1.4) on the field of view declared to the streamer; 1.0 = the compositor's whole frustum.
+    /// Horizontal scales the left and right edges, vertical the top and bottom edges.
+    var fovScaleH: Float = 1.0
+    var fovScaleV: Float = 1.0
+    /// False = "Default FoV" is on: both axes are 1.0 and the sliders are hidden. Turning it on resets both to 1.0.
+    var fovCustom: Bool = false
     var targetHandsAtRoundtripLatency = false
     var showFaceTrackingDebug = false
     var lastUsedAppVersion = "never launched"
     var chaperoneDistanceCm: Int = 0
-    var showPerformanceHud: Bool = false
     var claimControllerHomeButton: Bool = true
     
+    private enum LegacyKeys: String, CodingKey { case fovRenderScale }
+
     init() {}
     
     init(from decoder: Decoder) throws {
@@ -54,12 +59,16 @@ struct GlobalSettings: Codable {
         self.dismissWindowOnEnter = try container.decodeIfPresent(Bool.self, forKey: .dismissWindowOnEnter) ?? self.dismissWindowOnEnter
         self.heightOffsetCm = try container.decodeIfPresent(Int.self, forKey: .heightOffsetCm) ?? self.heightOffsetCm
         self.autoConnect = try container.decodeIfPresent(Bool.self, forKey: .autoConnect) ?? self.autoConnect
-        self.fovRenderScale = try container.decodeIfPresent(Float.self, forKey: .fovRenderScale) ?? self.fovRenderScale
+        // Before 1.3.6 one uniform factor (fovRenderScale) covered both axes: it becomes both, so nothing changes for existing installs.
+        let legacyFovScale = try decoder.container(keyedBy: LegacyKeys.self).decodeIfPresent(Float.self, forKey: .fovRenderScale) ?? 1.0
+        self.fovScaleH = try container.decodeIfPresent(Float.self, forKey: .fovScaleH) ?? legacyFovScale
+        self.fovScaleV = try container.decodeIfPresent(Float.self, forKey: .fovScaleV) ?? legacyFovScale
+        // A value saved by an earlier build that is not 1.0 keeps its sliders showing (never silently reset).
+        self.fovCustom = try container.decodeIfPresent(Bool.self, forKey: .fovCustom) ?? (self.fovScaleH != 1.0 || self.fovScaleV != 1.0)
         self.targetHandsAtRoundtripLatency = try container.decodeIfPresent(Bool.self, forKey: .targetHandsAtRoundtripLatency) ?? self.targetHandsAtRoundtripLatency
         self.showFaceTrackingDebug = try container.decodeIfPresent(Bool.self, forKey: .showFaceTrackingDebug) ?? self.showFaceTrackingDebug
         self.lastUsedAppVersion = try container.decodeIfPresent(String.self, forKey: .lastUsedAppVersion) ?? self.lastUsedAppVersion
         self.chaperoneDistanceCm = try container.decodeIfPresent(Int.self, forKey: .chaperoneDistanceCm) ?? self.chaperoneDistanceCm
-        self.showPerformanceHud = try container.decodeIfPresent(Bool.self, forKey: .showPerformanceHud) ?? self.showPerformanceHud
         self.claimControllerHomeButton = try container.decodeIfPresent(Bool.self, forKey: .claimControllerHomeButton) ?? self.claimControllerHomeButton
     }
 }

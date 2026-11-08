@@ -150,6 +150,8 @@ class EventHandler: ObservableObject {
     var decoderRebuildPending = false
     var backgroundSince: Double = 0
     var lastIpd: Float = -1
+    /// The (horizontal, vertical) FoV scale last declared to the streamer.
+    var lastFovScale = simd_float2(1, 1)
     var viewTransforms: [simd_float4x4] = [matrix_identity_float4x4, matrix_identity_float4x4]
     var viewFovs: [AlvrFov] = [AlvrFov(left: -1.0471973, right: 0.7853982, up: 0.7853982, down: -0.8726632), AlvrFov(left: -0.7853982, right: 1.0471973, up: 0.7853982, down: -0.8726632)]
     var sentViewTangents: [simd_float4] = [simd_float4(1.73205, 1.0, 1.0, 1.19175), simd_float4(1.0, 1.73205, 1.0, 1.19175)]
@@ -596,9 +598,6 @@ class EventHandler: ObservableObject {
         }
         
         let timestamp = frameData.timestamp_ns
-        if ALVRClientApp.gStore.settings.showPerformanceHud {
-            PerformanceTracker.shared.recordReceive(timestampNs: timestamp)
-        }
         let nal = UnsafeMutableBufferPointer<UInt8>(start: UnsafeMutablePointer(mutating: frameData.buffer_ptr), count: Int(frameData.buffer_size))
         
         objc_sync_enter(self.frameQueueLock)
@@ -686,9 +685,6 @@ class EventHandler: ObservableObject {
                 objc_sync_enter(frameQueueLock)
                 consecutiveDecodeErrors = 0
                 objc_sync_exit(frameQueueLock)
-                if ALVRClientApp.gStore.settings.showPerformanceHud {
-                    PerformanceTracker.shared.recordDecodeEnd(timestampNs: timestamp)
-                }
                 //print("Frame decoded")
                 
                 if (CACurrentMediaTime() - startedDecodeTime > Double(50*MSEC_PER_SEC)) {

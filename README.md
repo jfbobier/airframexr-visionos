@@ -28,8 +28,10 @@ Everything below is in the `airframexr-client` branch on top of upstream `main`.
   the Vision Pro profile, 0.97 / 0.71 / 0.69 / 0.63) and only changes what the game renders. 1.2.0 to 1.3.1 cut the
   declared box to a fixed ceiling (1.03 / 0.79 / 0.75 / 0.86) instead: sharper, but black bars for wearers who see
   past it. Measurement and numbers: `docs/AVP_FOV.md` and `docs/FOV_CALIBRATION.md` in the AirFrameXR repository.
-  The **FoV Scale** slider (0.70 to 1.00, in the app) shrinks the declared box uniformly: less angle for the same stream
-  (denser pixels, a cheaper game) at the price of the edges; 1.00 is the stock app. It takes effect at the next connection.
+  The **Default FoV** switch (on = the stock app, both axes 1.0, turning it on resets them) hides or shows two **FoV sliders** (Horizontal and Vertical, 0.6 to 1.4, 1.0 in the middle) that scale the
+  declared box per axis: less angle for the same stream (denser pixels, a cheaper game) at the price of the edges, more
+  angle (above 1.0) the other way. With both equal the result is the same as the single FoV Scale of 1.3.5. They are read when
+  you press Enter.
 - The chroma key is taken from the streamer's settings (`video.passthrough`), so the key colour and distance are
   set once, on the PC. Keyed pixels are written transparent and everything the frame does not cover is black:
   you see the room between games (the streamer's idle colour) and around the desktop mirror's screen (its
@@ -55,8 +57,8 @@ Everything below is in the `airframexr-client` branch on top of upstream `main`.
 
 **Window**
 
-- One column: connection status, floor rows, three switches (Proximity chaperone,
-  Performance HUD on the left forearm, Auto-connect) and Enter. No settings that duplicate the PC's.
+- One column: connection status, the height line (HMD + offset = game height) with its offset slider, the Default FoV switch (and the two FoV sliders when it is off),
+  two switches (Proximity chaperone, Auto-connect) and Enter. No settings that duplicate the PC's.
 - Auto-connect enters the stream as soon as the streamer connects.
 - App name and icon: AirFrameXR.
 
@@ -80,7 +82,10 @@ workflow files show the exact commands (Rust client core, cbindgen, `repack_alvr
 - Aligned with the AirFrameXR 1.3.6 PC package; this is the first build that carries everything below. `airframexr-client` is the
   release branch (the 1.4 line is retired: no streamer-driven view, the app keeps the FoV Scale slider).
 - The encoding gamma the app asks the streamer for is now **1.2** (was 1.5), the value reported as the best for the Vision Pro; the app decodes with whatever the streamer negotiates, so a streamer that overrides it still wins. (Was committed after TestFlight build 1.3.5.)
-- The **FoV Scale** slider (below, from 1.3.5) is in this build.
+- The **FoV Scale** slider (below, from 1.3.5) is in this build, as **two sliders**, Horizontal and Vertical (0.6 to 1.4, centred on 1.0) behind a **Default FoV** switch (on by default; turning it on resets both to 1.0). A setting saved by an earlier build
+  is carried to both, with the switch off. Above 1.0 the app declares more angle than the compositor's frustum (1.3.5 capped at 1.0 after the old 1.1 did that): untested on a headset.
+- The Performance HUD (left forearm) and the frame timing it needed are removed.
+- The height rows are one line: `HMD 1.62 m + offset +5 cm = 1.67 m`. The Enter button has more room.
 
 ## 1.3.5
 

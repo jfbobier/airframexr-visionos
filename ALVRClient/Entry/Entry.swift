@@ -22,18 +22,13 @@ struct Entry: View {
         )
     }
 
-    private var floorReading: String {
+    /// "HMD 1.62 m + offset +5 cm = 1.67 m"
+    private var heightLine: String {
+        let offset = gStore.settings.heightOffsetCm
         guard let head = floorReadout.headY else {
-            return "–"
+            return String(format: "HMD – + offset %+d cm = –", offset)
         }
-        return String(format: "%.2f m", head)
-    }
-
-    private var gameHeight: String {
-        guard let head = floorReadout.headY else {
-            return "–"
-        }
-        return String(format: "%.2f m", head + Float(gStore.settings.heightOffsetCm) / 100.0)
+        return String(format: "HMD %.2f m + offset %+d cm = %.2f m", head, offset, head + Float(offset) / 100.0)
     }
 
     var body: some View {
@@ -65,12 +60,10 @@ struct Entry: View {
             .frame(minHeight: 200)
 
             VStack {
-                HStack {
-                    Text("Headset height above floor")
-                    Spacer()
-                    Text(floorReading)
-                        .foregroundStyle(floorReadingIsLive ? .primary : .secondary)
-                }
+                Text(heightLine)
+                    .monospacedDigit()
+                    .foregroundStyle(floorReadingIsLive ? .primary : .secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .onReceive(Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()) { _ in
                         guard !EventHandler.shared.renderStarted else { return }
                         if let y = WorldTracker.shared.currentHeadHeight() {
@@ -80,13 +73,6 @@ struct Entry: View {
                             floorReadingIsLive = false
                         }
                     }
-                HStack {
-                    Text("+ Manual height offset")
-                    Spacer()
-                    Text(gameHeight)
-                        .foregroundStyle(floorReadingIsLive ? .primary : .secondary)
-                }
-                .padding(.top)
                 Slider(value: heightOffsetCm, in: -50...50, step: 1) {
                     Text("Floor height offset")
                 }
@@ -97,18 +83,25 @@ struct Entry: View {
             .padding(.horizontal)
             .padding(.top)
 
-            VStack {
-                Text(String(format: "FoV Scale: %.2f", gStore.settings.fovRenderScale))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Slider(value: $gStore.settings.fovRenderScale, in: 0.7...1.0, step: 0.05) {
-                    Text("FoV Scale")
+            VStack(spacing: 14) {
+                Toggle(isOn: Binding(
+                    get: { !gStore.settings.fovCustom },
+                    set: { isDefault in
+                        if isDefault {
+                            gStore.settings.fovScaleH = 1.0
+                            gStore.settings.fovScaleV = 1.0
+                        }
+                        gStore.settings.fovCustom = !isDefault
+                        saveAction()
+                    }
+                )) {
+                    Text("Default FoV")
                 }
-                .onChange(of: gStore.settings.fovRenderScale) {
-                    saveAction()
+                .toggleStyle(.switch)
+                if gStore.settings.fovCustom {
+                    FovSliderRow(title: "Horizontal FoV", value: $gStore.settings.fovScaleH, saveAction: saveAction)
+                    FovSliderRow(title: "Vertical FoV", value: $gStore.settings.fovScaleV, saveAction: saveAction)
                 }
-                Text("Multiplies the field of view the app declares, on every edge. 1.00 is the whole frustum the headset asks for (the stock app). Less angle for the same stream: denser pixels and a cheaper game, but the picture ends sooner at the edges. Reconnect after changing.")
-                    .font(.system(size: 10))
-                    .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.horizontal)
             .padding(.top)
@@ -121,13 +114,6 @@ struct Entry: View {
                     Text("Proximity chaperone")
                 }
                 .toggleStyle(.switch)
-                Toggle(isOn: $gStore.settings.showPerformanceHud) {
-                    Text("Performance HUD (left forearm)")
-                }
-                .toggleStyle(.switch)
-                .onChange(of: gStore.settings.showPerformanceHud) {
-                    saveAction()
-                }
                 Toggle(isOn: $gStore.settings.autoConnect) {
                     Text("Auto-connect")
                 }
@@ -179,6 +165,45 @@ struct Entry: View {
         }
 
         EntryControls(saveAction: saveAction)
+            .padding(.bottom, 24)
+        }
+    }
+}
+
+/// A FoV slider (0.6 to 1.4) with the middle, 1.0, marked on the track (the value is printed next to the title).
+/// Values are snapped to the 0.05 grid so 1.0 is exactly 1.0 (not 0.99999994), which the declared field of view relies on
+/// to equal the stock frustum.
+struct FovSliderRow: View {
+    let title: String
+    @Binding var value: Float
+    let saveAction: () -> Void
+
+    private var snapped: Binding<Float> {
+        Binding(
+            get: { value },
+            set: { value = (min(fovScaleRange.upperBound, max(fovScaleRange.lowerBound, $0)) * 20).rounded() / 20 }
+        )
+    }
+
+    var body: some View {
+        VStack(spacing: 4) {
+            HStack {
+                Text(title)
+                Spacer()
+                Text(String(format: "%.2f", value))
+                    .monospacedDigit()
+            }
+            ZStack {
+                Capsule()
+                    .fill(.secondary)
+                    .frame(width: 3, height: 20)
+                Slider(value: snapped, in: fovScaleRange, step: 0.05) {
+                    Text(title)
+                }
+            }
+        }
+        .onChange(of: value) {
+            saveAction()
         }
     }
 }

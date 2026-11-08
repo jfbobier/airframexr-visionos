@@ -47,6 +47,9 @@ private func syncLock(_ obj: AnyObject) -> NSRecursiveLock {
 // MARK: - simd
 
 public typealias simd_float4 = SIMD4<Float>
+public typealias simd_float2 = SIMD2<Float>
+/// Apple's simd has a vector atan; per lane here (used by FovScale.swift and tools/protocol-harness/fov_check.sh).
+public func atan(_ v: SIMD4<Float>) -> SIMD4<Float> { SIMD4(atanf(v.x), atanf(v.y), atanf(v.z), atanf(v.w)) }
 public typealias simd_float3 = SIMD3<Float>
 
 public struct simd_float4x4: Equatable {
