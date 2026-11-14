@@ -20,6 +20,8 @@ PRIVACY_URL = "https://github.com/jfbobier/AirFrameXR/blob/main/PRIVACY.md"
 SUPPORT_URL = "https://github.com/jfbobier/AirFrameXR/issues"
 MARKETING_URL = "https://github.com/jfbobier/AirFrameXR"
 problems = []
+# App Motion Information: PC VR games can contain fast or artificial motion, so the honest answer is yes (Apple shows a motion warning on the page)
+HIGH_MOTION = True
 # Left out for a quick first review (extra regulatory paperwork): mainland China, South Korea, Vietnam, Russia
 EXCLUDED = {"CHN", "KOR", "VNM", "RUS"}
 
@@ -86,7 +88,8 @@ if not editable:
 ver = editable[0]
 vid = ver["id"]
 call("PATCH", f"/v1/appStoreVersions/{vid}", {"data": {"type": "appStoreVersions", "id": vid, "attributes": {
-    "versionString": version, "releaseType": "MANUAL", "copyright": "2026 AirFrameXR"}}})
+    "versionString": version, "releaseType": "MANUAL", "copyright": "2026 AirFrameXR",
+    "hasHighMotionLabel": HIGH_MOTION}}})
 print("version set to", version, "manual release")
 
 builds = call("GET", f"/v1/builds?filter[app]={aid}&filter[preReleaseVersion.version]={urllib.parse.quote(version)}&limit=200")["data"]
@@ -216,11 +219,18 @@ if problems:
 print("Done by hand once in App Store Connect (no public API): App Privacy (Data Not Collected) + publish, App Motion Information, EU DSA trader status.")
 if E.get("SUBMIT") == "1":
     step("submit for review")
-    sub = call("POST", "/v1/reviewSubmissions", {"data": {"type": "reviewSubmissions", "attributes": {"platform": "VISION_OS"},
-              "relationships": {"app": {"data": {"type": "apps", "id": aid}}}}})
-    sid = sub["data"]["id"]
-    call("POST", "/v1/reviewSubmissionItems", {"data": {"type": "reviewSubmissionItems", "relationships": {
-        "reviewSubmission": {"data": {"type": "reviewSubmissions", "id": sid}}, "appStoreVersion": {"data": {"type": "appStoreVersions", "id": vid}}}}})
+    open_subs = [x for x in call("GET", f"/v1/apps/{aid}/reviewSubmissions?filter[state]=READY_FOR_REVIEW&filter[platform]=VISION_OS")["data"]]
+    if open_subs:
+        sid = open_subs[0]["id"]
+        print("reusing the draft review submission", sid)
+    else:
+        sub = call("POST", "/v1/reviewSubmissions", {"data": {"type": "reviewSubmissions", "attributes": {"platform": "VISION_OS"},
+                  "relationships": {"app": {"data": {"type": "apps", "id": aid}}}}})
+        sid = sub["data"]["id"]
+    items = call("GET", f"/v1/reviewSubmissions/{sid}/items")["data"]
+    if not items:
+        call("POST", "/v1/reviewSubmissionItems", {"data": {"type": "reviewSubmissionItems", "relationships": {
+            "reviewSubmission": {"data": {"type": "reviewSubmissions", "id": sid}}, "appStoreVersion": {"data": {"type": "appStoreVersions", "id": vid}}}}})
     call("PATCH", f"/v1/reviewSubmissions/{sid}", {"data": {"type": "reviewSubmissions", "id": sid, "attributes": {"submitted": True}}})
     print("SUBMITTED to App Review")
 else:
