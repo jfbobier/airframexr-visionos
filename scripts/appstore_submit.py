@@ -182,13 +182,32 @@ while url:
         break
     terr += [x["id"] for x in t["data"]]
     url = t.get("links", {}).get("next")
-if terr:
+existing = None
+try:
+    existing = call("GET", f"/v2/appAvailabilities/{aid}/territoryAvailabilities?include=territory&limit=200")
+except SystemExit:
+    existing = None
+if existing and existing.get("data"):
+    # already created (the API cannot create it twice): switch single territories on/off
+    n = 0
+    url = f"/v2/appAvailabilities/{aid}/territoryAvailabilities?include=territory&limit=200"
+    while url:
+        page = call("GET", url)
+        for ta in page["data"]:
+            tid = ta["relationships"]["territory"]["data"]["id"]
+            want = tid not in EXCLUDED
+            if ta["attributes"].get("available") != want:
+                call("PATCH", f"/v2/territoryAvailabilities/{ta['id']}", {"data": {"type": "territoryAvailabilities", "id": ta["id"], "attributes": {"available": want}}}, soft="territory " + tid)
+                n += 1
+        url = page.get("links", {}).get("next")
+    print("availability already existed:", n, "territory switches changed; excluded:", sorted(EXCLUDED))
+elif terr:
     call("POST", "/v2/appAvailabilities", {"data": {"type": "appAvailabilities", "attributes": {"availableInNewTerritories": False}, "relationships": {
         "app": {"data": {"type": "apps", "id": aid}},
         "territoryAvailabilities": {"data": [{"type": "territoryAvailabilities", "id": f"${{t{i}}}"} for i in range(len(terr))]}}},
         "included": [{"type": "territoryAvailabilities", "id": f"${{t{i}}}", "attributes": {"available": t not in EXCLUDED}, "relationships": {
             "territory": {"data": {"type": "territories", "id": t}}}} for i, t in enumerate(terr)]}, soft="availability")
-    print("availability:", len(terr) - len([t for t in terr if t in EXCLUDED]), "territories on sale; excluded:", sorted(EXCLUDED), "; new territories are NOT added automatically")
+    print("availability created; excluded:", sorted(EXCLUDED), "; new territories are NOT added automatically")
 
 # ---- readiness report and submission
 step("readiness")
