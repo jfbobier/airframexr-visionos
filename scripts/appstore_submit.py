@@ -20,6 +20,8 @@ PRIVACY_URL = "https://github.com/jfbobier/AirFrameXR/blob/main/PRIVACY.md"
 SUPPORT_URL = "https://github.com/jfbobier/AirFrameXR/issues"
 MARKETING_URL = "https://github.com/jfbobier/AirFrameXR"
 problems = []
+# Left out for a quick first review (extra regulatory paperwork): mainland China, South Korea, Vietnam, Russia
+EXCLUDED = {"CHN", "KOR", "VNM", "RUS"}
 
 
 def tok():
@@ -161,7 +163,7 @@ if shots:
 else:
     print("no file in appstore/screenshots/: skipped")
 
-# ---- price: free; availability: all territories, mainland China marked unavailable
+# ---- price: free; availability: all territories except EXCLUDED, new territories not added automatically
 step("price and availability")
 pts = call("GET", f"/v1/apps/{aid}/appPricePoints?filter[territory]=USA&limit=200", soft="price points")
 free = next((p for p in (pts or {"data": []})["data"] if float(p["attributes"].get("customerPrice") or 1) == 0.0), None)
@@ -181,12 +183,12 @@ while url:
     terr += [x["id"] for x in t["data"]]
     url = t.get("links", {}).get("next")
 if terr:
-    call("POST", "/v2/appAvailabilities", {"data": {"type": "appAvailabilities", "attributes": {"availableInNewTerritories": True}, "relationships": {
+    call("POST", "/v2/appAvailabilities", {"data": {"type": "appAvailabilities", "attributes": {"availableInNewTerritories": False}, "relationships": {
         "app": {"data": {"type": "apps", "id": aid}},
         "territoryAvailabilities": {"data": [{"type": "territoryAvailabilities", "id": f"${{t{i}}}"} for i in range(len(terr))]}}},
-        "included": [{"type": "territoryAvailabilities", "id": f"${{t{i}}}", "attributes": {"available": t != "CHN"}, "relationships": {
+        "included": [{"type": "territoryAvailabilities", "id": f"${{t{i}}}", "attributes": {"available": t not in EXCLUDED}, "relationships": {
             "territory": {"data": {"type": "territories", "id": t}}}} for i, t in enumerate(terr)]}, soft="availability")
-    print("availability:", len(terr), "territories (CHN unavailable)")
+    print("availability:", len(terr) - len([t for t in terr if t in EXCLUDED]), "territories on sale; excluded:", sorted(EXCLUDED), "; new territories are NOT added automatically")
 
 # ---- readiness report and submission
 step("readiness")
