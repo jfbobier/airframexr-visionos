@@ -197,7 +197,7 @@ if existing and existing.get("data"):
             tid = ta["relationships"]["territory"]["data"]["id"]
             want = tid not in EXCLUDED
             if ta["attributes"].get("available") != want:
-                call("PATCH", f"/v2/territoryAvailabilities/{ta['id']}", {"data": {"type": "territoryAvailabilities", "id": ta["id"], "attributes": {"available": want}}}, soft="territory " + tid)
+                call("PATCH", f"/v1/territoryAvailabilities/{ta['id']}", {"data": {"type": "territoryAvailabilities", "id": ta["id"], "attributes": {"available": want}}}, soft="territory " + tid)
                 n += 1
         url = page.get("links", {}).get("next")
     print("availability already existed:", n, "territory switches changed; excluded:", sorted(EXCLUDED))
