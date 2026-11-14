@@ -127,7 +127,7 @@ print("category Utilities, subtitle, privacy URL, age rating (all none) set")
 # ---- review details
 step("review details")
 rd = {"contactFirstName": E["REVIEW_CONTACT_FIRST"], "contactLastName": E["REVIEW_CONTACT_LAST"], "contactPhone": E["REVIEW_CONTACT_PHONE"],
-      "contactEmail": E["REVIEW_CONTACT_EMAIL"], "demoAccountRequired": False, "notes": read("review_notes.txt")}
+      "contactEmail": E["REVIEW_CONTACT_EMAIL"], "demoAccountRequired": False, "notes": read("review_notes.txt") + ("\n\nDEMO VIDEO (real device, PC and headset view, unlisted): " + read("review_video_url.txt") if read("review_video_url.txt") else "")}
 cur = call("GET", f"/v1/appStoreVersions/{vid}/appStoreReviewDetail")
 if cur and cur.get("data"):
     rid = cur["data"]["id"]

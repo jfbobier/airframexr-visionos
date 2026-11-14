@@ -4,7 +4,7 @@ AirFrameXR is a client that displays PC VR games running on a PC that the user o
 WHAT YOU NEED TO REVIEW IT
 1. An Apple Vision Pro and a Windows 10/11 PC with an NVIDIA GPU, both on the same Wi-Fi/LAN.
 2. The free, open-source streamer for the PC: https://github.com/jfbobier/AirFrameXR/releases (latest release, unzip, run AirFrameXR.exe, open the streamer window and leave it open). Source: https://github.com/jfbobier/AirFrameXR
-3. A demo video recorded with a real camera, showing the Vision Pro, the PC, starting the streamer, the Local Network permission prompt, and a stream running, is attached to this submission.
+3. A demo video recorded with a real camera, showing the Vision Pro, the PC, starting the streamer, the Local Network permission prompt, and a stream running, is linked at the end of these notes.
 
 PERMISSIONS (all used only to send data to the user's own PC)
 - Local Network (and Bonjour _alvr._tcp): find and connect to the streamer on the LAN.
