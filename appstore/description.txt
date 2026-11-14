@@ -1,0 +1,18 @@
+AirFrameXR turns Apple Vision Pro into a wireless display for PC VR games running on your own Windows PC with an NVIDIA graphics card. The game runs on your PC; this app shows the picture, tracks your head, hands and controllers, and sends them back. Everything stays on your home network.
+
+HOW IT WORKS
+• Install the free AirFrameXR streamer on your Windows PC (github.com/jfbobier/AirFrameXR), keep it running, and open this app on your Vision Pro on the same network.
+• The app finds your PC on the local network, or you pick it by its address. Nothing leaves your network: no account, no cloud, no subscription.
+• Games and apps that run on your PC through OpenXR are streamed with hardware video encoding, low-latency transport and foveated rendering to keep the picture sharp where you look.
+
+FEATURES
+• Low-latency wireless streaming over your local Wi-Fi (Wi-Fi 6 or newer recommended).
+• Head, hand, finger and spatial-controller tracking sent to your PC; game controllers and Steam Controllers supported.
+• Adjustable field of view, resolution scale and frame rate.
+• Open source and built on the ALVR streaming protocol.
+
+PRIVACY
+The developer collects no data. Tracking data goes only to your own PC, on your own network.
+
+REQUIREMENTS
+Apple Vision Pro, a Windows 10/11 PC with an NVIDIA GPU (RTX 40 series or newer recommended) running the AirFrameXR streamer, both on the same local network.

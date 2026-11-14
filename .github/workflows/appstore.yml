@@ -1,0 +1,48 @@
+name: App Store
+
+# Fills in the App Store Connect record of the visionOS client from appstore/ (texts, screenshots, review notes, review video)
+# and, when "submit" is ticked, sends it to App Review. Default is a dry run: everything is filled in, nothing is submitted.
+# Run by hand: Actions > App Store > Run workflow. Uses the same secrets as the TestFlight workflow.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Marketing version of the TestFlight build to submit (CFBundleShortVersionString)"
+        default: "1.3.10"
+      build:
+        description: "Build number (empty = the newest valid build of that version)"
+        default: ""
+      submit:
+        description: "Submit to App Review (untick = only fill in the record)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  appstore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+      BUNDLE_ID: ${{ vars.BUNDLE_ID }}
+      REVIEW_CONTACT_FIRST: ${{ secrets.BETA_CONTACT_FIRST }}
+      REVIEW_CONTACT_LAST: ${{ secrets.BETA_CONTACT_LAST }}
+      REVIEW_CONTACT_PHONE: ${{ secrets.BETA_CONTACT_PHONE }}
+      REVIEW_CONTACT_EMAIL: ${{ secrets.BETA_CONTACT_EMAIL }}
+      VERSION: ${{ inputs.version }}
+      BUILD: ${{ inputs.build }}
+      SUBMIT: ${{ inputs.submit && '1' || '0' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fill in the App Store record
+        run: |
+          mkdir -p "$RUNNER_TEMP/asc"
+          printf '%s\n' "$ASC_KEY_P8" > "$RUNNER_TEMP/asc/key.p8"
+          export ASC_KEY_PATH="$RUNNER_TEMP/asc/key.p8"
+          python3 -m pip install --quiet --disable-pip-version-check --break-system-packages pyjwt cryptography
+          python3 scripts/appstore_submit.py

@@ -1,0 +1,22 @@
+WHAT THIS APP IS
+AirFrameXR is a client that displays PC VR games running on a PC that the user owns, on the same local network as the Vision Pro. It is a remote-display client in the sense of App Review Guideline 4.2.7: it connects only to the user's own PC on the same local network, all software runs on that PC, and the app offers no store, catalog, cloud service, account or subscription. No Internet connection is required or used.
+
+WHAT YOU NEED TO REVIEW IT
+1. An Apple Vision Pro and a Windows 10/11 PC with an NVIDIA GPU, both on the same Wi-Fi/LAN.
+2. The free, open-source streamer for the PC: https://github.com/jfbobier/AirFrameXR/releases (latest release, unzip, run AirFrameXR.exe, open the streamer window and leave it open). Source: https://github.com/jfbobier/AirFrameXR
+3. A demo video recorded with a real camera, showing the Vision Pro, the PC, starting the streamer, the Local Network permission prompt, and a stream running, is attached to this submission.
+
+PERMISSIONS (all used only to send data to the user's own PC)
+- Local Network (and Bonjour _alvr._tcp): find and connect to the streamer on the LAN.
+- Hand tracking, accessory tracking (spatial controllers), camera (Persona face tracking), Bluetooth (Steam Controllers) and world sensing (obstacle warning, play-area placement): inputs for the game. They are optional features; the app works if they are refused.
+
+NETWORK
+Default ports of the ALVR protocol on the LAN: 9943 (TCP control and UDP discovery) and 9944 (UDP stream). Discovery uses Bonjour on _alvr._tcp; the streamer address can also be entered by hand.
+
+ENTITLEMENT
+com.apple.developer.low-latency-streaming is used because the app is a PC game streamer (streamed game content), for its intended purpose.
+
+CONTENT / PRIVACY
+The app has no content of its own. The developer collects no data (see https://github.com/jfbobier/AirFrameXR/blob/main/PRIVACY.md). Encryption: only what the operating system provides; no encryption library is bundled.
+
+Contact for questions during review: see the contact details of this submission.
