@@ -5,8 +5,6 @@ name: App Store
 # Run by hand: Actions > App Store > Run workflow. Uses the same secrets as the TestFlight workflow.
 
 on:
-  push:
-    branches: [appstore]   # TEMPORARY: lets the dry run start from the branch; removed before the merge to main
   workflow_dispatch:
     inputs:
       version:
