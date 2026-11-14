@@ -118,7 +118,7 @@ none_enum = ["alcoholTobaccoOrDrugUseOrReferences", "contests", "gamblingSimulat
              "matureOrSuggestiveThemes", "medicalOrTreatmentInformation", "profanityOrCrudeHumor", "sexualContentGraphicAndNudity",
              "sexualContentOrNudity", "violenceCartoonOrFantasy", "violenceRealistic", "violenceRealisticProlongedGraphicOrSadistic"]
 no_bool = ["advertising", "gambling", "lootBox", "messagingAndChat", "parentalControls", "ageAssurance", "unrestrictedWebAccess",
-           "userGeneratedContent", "healthOrWellnessTopics"]
+           "userGeneratedContent", "healthOrWellnessTopics", "socialMedia"]
 attrs = {k: "NONE" for k in none_enum}
 attrs.update({k: False for k in no_bool})
 call("PATCH", f"/v1/ageRatingDeclarations/{info['id']}", {"data": {"type": "ageRatingDeclarations", "id": info["id"], "attributes": attrs}}, soft="age rating")
@@ -161,7 +161,7 @@ if shots:
 else:
     print("no file in appstore/screenshots/: skipped")
 
-# ---- price: free; availability: all territories except mainland China
+# ---- price: free; availability: all territories, mainland China marked unavailable
 step("price and availability")
 pts = call("GET", f"/v1/apps/{aid}/appPricePoints?filter[territory]=USA&limit=200", soft="price points")
 free = next((p for p in (pts or {"data": []})["data"] if float(p["attributes"].get("customerPrice") or 1) == 0.0), None)
@@ -180,14 +180,13 @@ while url:
         break
     terr += [x["id"] for x in t["data"]]
     url = t.get("links", {}).get("next")
-terr = [t for t in terr if t != "CHN"]
 if terr:
     call("POST", "/v2/appAvailabilities", {"data": {"type": "appAvailabilities", "attributes": {"availableInNewTerritories": True}, "relationships": {
         "app": {"data": {"type": "apps", "id": aid}},
         "territoryAvailabilities": {"data": [{"type": "territoryAvailabilities", "id": f"${{t{i}}}"} for i in range(len(terr))]}}},
-        "included": [{"type": "territoryAvailabilities", "id": f"${{t{i}}}", "attributes": {"available": True}, "relationships": {
+        "included": [{"type": "territoryAvailabilities", "id": f"${{t{i}}}", "attributes": {"available": t != "CHN"}, "relationships": {
             "territory": {"data": {"type": "territories", "id": t}}}} for i, t in enumerate(terr)]}, soft="availability")
-    print("availability:", len(terr), "territories")
+    print("availability:", len(terr), "territories (CHN unavailable)")
 
 # ---- readiness report and submission
 step("readiness")
