@@ -20,8 +20,6 @@ PRIVACY_URL = "https://github.com/jfbobier/AirFrameXR/blob/main/PRIVACY.md"
 SUPPORT_URL = "https://github.com/jfbobier/AirFrameXR/issues"
 MARKETING_URL = "https://github.com/jfbobier/AirFrameXR"
 problems = []
-# App Motion Information: PC VR games can contain fast or artificial motion, so the honest answer is yes (Apple shows a motion warning on the page)
-HIGH_MOTION = True
 # Left out for a quick first review (extra regulatory paperwork): mainland China, South Korea, Vietnam, Russia
 EXCLUDED = {"CHN", "KOR", "VNM", "RUS"}
 
@@ -88,8 +86,7 @@ if not editable:
 ver = editable[0]
 vid = ver["id"]
 call("PATCH", f"/v1/appStoreVersions/{vid}", {"data": {"type": "appStoreVersions", "id": vid, "attributes": {
-    "versionString": version, "releaseType": "MANUAL", "copyright": "2026 AirFrameXR",
-    "hasHighMotionLabel": HIGH_MOTION}}})
+    "versionString": version, "releaseType": "MANUAL", "copyright": "2026 AirFrameXR"}}})
 print("version set to", version, "manual release")
 
 builds = call("GET", f"/v1/builds?filter[app]={aid}&filter[preReleaseVersion.version]={urllib.parse.quote(version)}&limit=200")["data"]
