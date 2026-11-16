@@ -135,6 +135,16 @@ struct ALVRClientApp: App {
                         openWindow(id: "Entry")
                     }
                 }
+                // The headset came back after a hold that had ended the immersive space (EventHandler.exitIfBackgrounded):
+                // the stream never stopped, so the space is simply opened again.
+                EventHandler.shared.onResumeStream = {
+                    Task { @MainActor in
+                        openWindow(id: "Entry")
+                        model.isShowingClient = false
+                        try? await Task.sleep(nanoseconds: 300_000_000)
+                        model.isShowingClient = true
+                    }
+                }
                 EventHandler.shared.initializeAlvr()
                 // This task runs every time the Entry window appears, including when the app brings it back after a lost link:
                 // the ARKit session is only (re)started when it is not running (initializeAr holds an objc_sync lock across an await).

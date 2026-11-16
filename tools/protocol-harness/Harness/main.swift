@@ -38,6 +38,8 @@ enum Phase {
     case restart(gapSeconds: Double)
     /// visionOS reports the app in the background for a while
     case background(seconds: Double)
+    /// the longest time the client holds a stream with the app in the background (EventHandler.backgroundHoldMax)
+    case setHoldMax(seconds: Double)
     /// the client enters its immersive space (render loop starts) at this point of the script
     case enterImmersive
     /// the decoder session dies under the client (VideoToolbox returns kVTInvalidSessionErr, as after a pause)
@@ -57,6 +59,8 @@ struct Scenario {
     var maxReconnects = 0
     var minReconnects = 0
     var expectExit = false
+    /// the app in the background with a stream up must be held (connection kept, no picture decoded) and resume
+    var expectHold = false
     /// the display's real rate (the system decides 90 or 100 Hz, the app does not) and the rate the streamer negotiated
     var displayHz = 90.0
     var hintHz = 90.0
@@ -167,8 +171,12 @@ let scenarios: [Scenario] = [
              phases: [game90, .stream(seconds: 6, fps: 100, arrivalJitterMs: 0.5), .switchDisplay(hz: 90, stallMs: 60), .stream(seconds: 2, fps: 90, arrivalJitterMs: 0.5),
                       .switchDisplay(hz: 100, stallMs: 60), .stream(seconds: 2, fps: 100, arrivalJitterMs: 0.5), .switchDisplay(hz: 96, stallMs: 40), .stream(seconds: 12, fps: 96, arrivalJitterMs: 0.5)],
              displayHz: 100, hintHz: 100, maxPostSwitchStuckTicks: 3, maxPostSwitchRepeatFraction: 0.02),
-    Scenario(name: "background_real", about: "the wearer leaves the app: background for 3 s (the client must exit)",
-             phases: [game90, .background(seconds: 3), game90], expectExit: true),
+    Scenario(name: "background_real", about: "the hold is over (cap 2 s) with the app still in the background for 5 s: the client must exit",
+             phases: [game90, .setHoldMax(seconds: 2), .background(seconds: 5), game90], expectExit: true),
+    Scenario(name: "background_hold", about: "headset off for 4 s with a stream up: connection kept, no picture decoded, no exit, picture back after",
+             phases: [game90, .background(seconds: 4), game90], expectHold: true),
+    Scenario(name: "background_hold_long", about: "headset off for 12 s: the stream is still held, no keyframe storm while off, picture back after",
+             phases: [game90, .background(seconds: 12), game90], expectHold: true),
 ]
 
 // MARK: - Host thread
@@ -264,8 +272,19 @@ final class Host: @unchecked Sendable {
         case .background(let s):
             HarnessLog.shared.event("phase", ["kind": "background", "s": "\(s)"])
             UIApplication.shared.applicationState = .background
-            sleep(s)
+            // the client waits 1 s before it holds: decoded frames are counted after that second only
+            if s > 1.5 {
+                sleep(1.5)
+                HarnessStats.shared.lock.lock(); let before = HarnessStats.shared.decodedFrames; HarnessStats.shared.lock.unlock()
+                sleep(s - 1.5)
+                HarnessStats.shared.lock.lock(); let after = HarnessStats.shared.decodedFrames; HarnessStats.shared.lock.unlock()
+                HarnessStats.shared.count("decoded_in_background", by: after - before)
+            } else {
+                sleep(s)
+            }
             UIApplication.shared.applicationState = .active
+        case .setHoldMax(let s):
+            EventHandler.backgroundHoldMax = s
         case .enterImmersive:
             DisplaySim.shared.start()
         case .breakDecoder:
@@ -407,6 +426,14 @@ func evaluate(_ sc: Scenario, lastPhaseStart: Double, end: Double) -> Verdict {
         if want && left < 1 { fails.append("the link was lost for a long time and the client never left the immersive space") }
         if !want && left > 0 { fails.append("a short link loss made the client leave the immersive space") }
         if want && !EventHandler.shared.renderStarted { fails.append("the client did not come back into the stream after the link returned") }
+    }
+    if sc.expectHold {
+        m["decoded_in_background"] = Double(HarnessStats.shared.get("decoded_in_background"))
+        if st.clientCounters["hold_started", default: 0] < 1 { fails.append("the client never held the stream in the background") }
+        if st.clientCounters["hold_resumed", default: 0] < 1 { fails.append("the client never resumed after the background") }
+        if st.clientCounters["app_background_exit", default: 0] > 0 { fails.append("the client left although a stream was up") }
+        if HarnessStats.shared.get("decoded_in_background") > 3 { fails.append("the client kept decoding pictures with the headset off") }
+        if st.clientCounters["request_idr_5s", default: 0] > 1 { fails.append("the 5 s no-picture rule kept asking for keyframes during the hold") }
     }
     if sc.expectExit {
         fails.append("the client did not exit although the app stayed in the background")

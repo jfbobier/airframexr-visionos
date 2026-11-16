@@ -70,6 +70,8 @@ final class HarnessStats: @unchecked Sendable {
         ("decode_overrun", "Handle decode overrun"), ("app_background_exit", "App in background"),
         ("event_thread_mia", "Event thread is MIA"), ("create_decoder", "create decoder"),
         ("streaming_started", "streaming started"), ("streaming_stopped", "streaming stopped"),
+        ("hold_started", "app in the background with a stream up"), ("hold_resumed", "back from the background after"),
+        ("hold_over", "background hold over"),
         ("format_fail", "format fail"), ("bad_view_params", "aaaaaaaa bad view params"),
     ]
 

@@ -71,6 +71,14 @@ class MetalClientSystem {
                 EventHandler.shared.renderStarted = false
                 EventHandler.shared.leaveRequested = false
                 break
+            } else if layerRenderer.state == .invalidated && EventHandler.shared.layerEndedWithHeadsetOff() {
+                // headset off: the space ends but the stream stays (game audio goes on, no picture), the app re-enters on its own
+                EventHandler.shared.streamLog("Layer invalidated with the app in the background: keeping the stream")
+                EventHandler.shared.handleHeadsetRemovedOrReentry()
+                WorldTracker.shared.resetPlayspace()
+                EventHandler.shared.resumeAfterHold = true
+                EventHandler.shared.renderStarted = false
+                break
             } else if layerRenderer.state == .invalidated {
                 print("Layer is invalidated")
                 //EventHandler.shared.stop()

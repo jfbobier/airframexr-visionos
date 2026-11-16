@@ -124,6 +124,17 @@ class EventHandler: ObservableObject {
     var streamLostSince: Double? = nil
     /// the render loop must end without alvr_pause() or exit(0): this is the app leaving on its own, the core keeps listening
     var leaveRequested = false
+    /// The headset is off (visionOS put the app in the background) while a stream is up: the connection, the game audio and the
+    /// tracking keep-alive go on, no picture is decoded or drawn. Main thread sets it, any thread reads it.
+    var heldInBackground = false
+    /// The layer ended while the app was held: when the headset is back, the app re-enters the immersive space by itself
+    var resumeAfterHold = false
+    var backgroundHoldStart = 0.0
+    /// Longest time a held stream is kept with the headset off or the app out of sight (a bound, not a setting): the PC keeps
+    /// playing the game for this long, then the app leaves as it always did.
+    nonisolated(unsafe) static var backgroundHoldMax = 30.0 * 60.0  // var only for the protocol harness
+    /// Set by the UI: open the immersive space again after a hold that ended it.
+    var onResumeStream: (() -> Void)? = nil
     
     
     @Published var connectionState: ConnectionState = .disconnected
@@ -603,11 +614,42 @@ class EventHandler: ObservableObject {
         ("[stream] " + line).withCString { alvr_log(UInt8(ALVR_LOG_LEVEL_ERROR.rawValue), $0) }
     }
 
-    /// Main thread. The app leaves when visionOS puts it in the background, but only once the state has held for a second:
-    /// a one-off background report during a stream transition must not close the app.
+    /// Any thread. True when the app is in the background right now (visionOS: headset off, or the app out of sight).
+    func appIsInBackground() -> Bool {
+        if Thread.isMainThread { return UIApplication.shared.applicationState == .background }
+        return DispatchQueue.main.sync { UIApplication.shared.applicationState == .background }
+    }
+
+    /// Render thread, the layer was invalidated and no link was lost: waits up to 1.5 s for the background state, which can
+    /// arrive after the layer's end. True = the headset is off (keep the stream), false = the wearer left (the old path).
+    func layerEndedWithHeadsetOff() -> Bool {
+        guard streamingActive else { return false }
+        for _ in 0..<15 {
+            if appIsInBackground() { return true }
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        return false
+    }
+
+    /// Main thread. With a stream up, the app stays alive in the background (headset off) for `backgroundHoldMax`: the audio
+    /// session keeps it running and the connection open, and the picture is not decoded (handleNals drops it). Without a stream
+    /// the app leaves when visionOS puts it in the background, once the state has held for a second: a one-off background
+    /// report during a stream transition must not close the app.
     func exitIfBackgrounded() {
         let state = UIApplication.shared.applicationState
         if state != .background {
+            if heldInBackground {
+                heldInBackground = false
+                streamLog(String(format: "back from the background after %.1f s: stream resumed, keyframe requested", CACurrentMediaTime() - backgroundHoldStart))
+                handleHeadsetRemovedOrReentry()
+                resetEncoding()
+                timeLastFrameGot = CACurrentMediaTime()
+                timeLastFrameSent = CACurrentMediaTime()
+                if resumeAfterHold {
+                    resumeAfterHold = false
+                    if let resume = onResumeStream { resume() }
+                }
+            }
             if backgroundSince != 0 {
                 streamLog(String(format: "app was in the background for %.2f s, back now: not exiting", CACurrentMediaTime() - backgroundSince))
             }
@@ -621,7 +663,16 @@ class EventHandler: ObservableObject {
         if CACurrentMediaTime() - backgroundSince < 1.0 {
             return
         }
-        streamLog("App in background, exiting")
+        if streamingActive && alvrInitialized && CACurrentMediaTime() - backgroundSince < EventHandler.backgroundHoldMax {
+            if !heldInBackground {
+                heldInBackground = true
+                backgroundHoldStart = backgroundSince
+                streamLog("app in the background with a stream up: holding the connection (audio only) for up to \(Int(EventHandler.backgroundHoldMax)) s")
+            }
+            return
+        }
+        streamLog(heldInBackground ? "background hold over: exiting" : "App in background, exiting")
+        preventAudioCracklingOnExit()
         if let service = self.mdnsListener {
             service.cancel()
             self.mdnsListener = nil
@@ -647,7 +698,7 @@ class EventHandler: ObservableObject {
         self.timeLastNalArrived = self.timeLastFrameGot
         
         // Prevent NAL buildup
-        if !self.renderStarted {
+        if !self.renderStarted || self.heldInBackground {
             //VideoHandler.abandonAllPendingNals()
             retVal = true
             return retVal
@@ -948,7 +999,7 @@ class EventHandler: ObservableObject {
                     self.exitIfBackgrounded()
                 }
                 
-                if !renderStarted && streamingActive {
+                if (!renderStarted || heldInBackground) && streamingActive {
                     WorldTracker.shared.sendFakeTracking(viewFovs: viewFovs, targetTimestamp: CACurrentMediaTime() - 1.0)
                 }
 
@@ -993,7 +1044,8 @@ class EventHandler: ObservableObject {
                 timeLastFrameSent = CACurrentMediaTime()
             }
             
-            if alvrInitialized && (diffSinceLastNal >= 5.0) {
+            // (not while held with the headset off: the resume asks for the keyframe)
+            if alvrInitialized && !heldInBackground && (diffSinceLastNal >= 5.0) {
                 print("Request IDR")
                 resetEncoding()
                 timeLastFrameGot = CACurrentMediaTime()

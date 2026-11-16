@@ -5,7 +5,7 @@ PC runs the game through AirFrameXR's OpenXR runtime (frame generation, foveated
 the ALVR v20 protocol, and this app shows it on the Vision Pro with hand and PlayStation VR2 Sense controller
 tracking.
 
-Version 1.3.10 (numbered with the AirFrameXR streamer it pairs with). Nearly feature complete; what is left is listed at the end.
+Version 1.3.11 (numbered with the AirFrameXR streamer it pairs with). Nearly feature complete; what is left is listed at the end.
 
 ## Credits
 
@@ -81,6 +81,21 @@ Everything below is in the `airframexr-client` branch on top of upstream `main`.
 
 Same as upstream: see the [Building](https://github.com/alvr-org/alvr-visionos/wiki/Building) wiki page. The CI
 workflow files show the exact commands (Rust client core, cbindgen, `repack_alvr_client.sh`, then `xcodebuild`).
+
+## 1.3.11
+
+Headset off keeps the stream (the user takes the headset off to open the door, the game audio goes on, the picture is back when it is
+put on again). **Not tried on a headset**: checked in the protocol harness on Linux and compiled there only; the App Store build is
+under review, so nothing of this was pushed or built in CI.
+
+- **`UIBackgroundModes: audio`** in `Info.plist` (the app does play the game's audio) so visionOS does not suspend it at once.
+- **With a stream up, the background no longer ends the app.** `EventHandler.exitIfBackgrounded` holds the connection for up to
+  30 min (`backgroundHoldMax`, a bound, not a setting): no picture is decoded (`handleNals` drops it), the fake-tracking keep-alive
+  runs like before the space opened, and the audio session is left on. Without a stream, or after the bound, the app exits as before.
+- **A layer that ends with the headset off** (`MetalClientSystem.renderLoop`) no longer calls `alvr_pause()`; the app re-enters the
+  immersive space by itself when it is back (`onResumeStream`), asks for a keyframe, and the stream never stopped.
+- What is unknown until measured on a headset: how long visionOS lets the app run in the background, whether the headset plays audio
+  while not worn, and whether the layer is paused or invalidated when it comes off (the logs `[stream] ...background...` show it).
 
 ## 1.3.10
 
