@@ -136,13 +136,6 @@ struct Entry: View {
                         Text(eventHandler.hostname)
                         Text("IP:")
                         Text(eventHandler.IP)
-                        Text("Streamer Version:")
-                        if eventHandler.hostAlvrVersion != "" {
-                            Text(eventHandler.hostAlvrVersion)
-                        }
-                        else {
-                            Text("Disconnected")
-                        }
                     }
                     .frame(width: 300, alignment: .center)
                     .padding(.vertical)
