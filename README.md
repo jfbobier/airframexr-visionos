@@ -88,6 +88,8 @@ Headset off keeps the stream (the user takes the headset off to open the door, t
 put on again). **Not tried on a headset**: checked in the protocol harness on Linux and compiled there only; the App Store build is
 under review, so nothing of this was pushed or built in CI.
 
+- **A switch "Stream audio when headset removed"** on the Entry window, on by default (`streamAudioWhenHeadsetOff`); off = the app leaves in the
+  background as before. The stream-version line under the logo is gone from the Entry window (not useful to users).
 - **`UIBackgroundModes: audio`** in `Info.plist` (the app does play the game's audio) so visionOS does not suspend it at once.
 - **With a stream up, the background no longer ends the app.** `EventHandler.exitIfBackgrounded` holds the connection for up to
   30 min (`backgroundHoldMax`, a bound, not a setting): no picture is decoded (`handleNals` drops it), the fake-tracking keep-alive

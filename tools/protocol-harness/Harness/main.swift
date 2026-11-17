@@ -40,6 +40,8 @@ enum Phase {
     case background(seconds: Double)
     /// the longest time the client holds a stream with the app in the background (EventHandler.backgroundHoldMax)
     case setHoldMax(seconds: Double)
+    /// the "Stream audio when headset removed" switch
+    case holdSwitch(on: Bool)
     /// the client enters its immersive space (render loop starts) at this point of the script
     case enterImmersive
     /// the decoder session dies under the client (VideoToolbox returns kVTInvalidSessionErr, as after a pause)
@@ -173,6 +175,8 @@ let scenarios: [Scenario] = [
              displayHz: 100, hintHz: 100, maxPostSwitchStuckTicks: 3, maxPostSwitchRepeatFraction: 0.02),
     Scenario(name: "background_real", about: "the hold is over (cap 2 s) with the app still in the background for 5 s: the client must exit",
              phases: [game90, .setHoldMax(seconds: 2), .background(seconds: 5), game90], expectExit: true),
+    Scenario(name: "background_switch_off", about: "the switch is off: the app in the background with a stream up leaves as before 1.3.11",
+             phases: [game90, .holdSwitch(on: false), .background(seconds: 4), game90], expectExit: true),
     Scenario(name: "background_hold", about: "headset off for 4 s with a stream up: connection kept, no picture decoded, no exit, picture back after",
              phases: [game90, .background(seconds: 4), game90], expectHold: true),
     Scenario(name: "background_hold_long", about: "headset off for 12 s: the stream is still held, no keyframe storm while off, picture back after",
@@ -283,6 +287,8 @@ final class Host: @unchecked Sendable {
                 sleep(s)
             }
             UIApplication.shared.applicationState = .active
+        case .holdSwitch(let on):
+            EventHandler.shared.holdStreamWhenHeadsetOff = on
         case .setHoldMax(let s):
             EventHandler.backgroundHoldMax = s
         case .enterImmersive:

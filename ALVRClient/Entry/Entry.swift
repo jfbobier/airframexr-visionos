@@ -42,15 +42,6 @@ struct Entry: View {
                 .frame(maxWidth: .infinity, maxHeight: 150)
                 .padding(.top)
 
-                if eventHandler.alvrVersion != "" {
-                    Text(eventHandler.alvrVersion)
-                        .font(.system(size: 20, weight: .bold))
-                }
-                else {
-                    Text("Loading settings...")
-                        .font(.system(size: 20, weight: .bold))
-                }
-
                 VStack {
                     Text(eventHandler.connectionFlavorText)
                         .font(.system(size: 15))
@@ -119,6 +110,14 @@ struct Entry: View {
                 }
                 .toggleStyle(.switch)
                 .onChange(of: gStore.settings.autoConnect) {
+                    saveAction()
+                }
+                Toggle(isOn: $gStore.settings.streamAudioWhenHeadsetOff) {
+                    Text("Stream audio when headset removed")
+                }
+                .toggleStyle(.switch)
+                .onChange(of: gStore.settings.streamAudioWhenHeadsetOff) {
+                    EventHandler.shared.holdStreamWhenHeadsetOff = gStore.settings.streamAudioWhenHeadsetOff
                     saveAction()
                 }
             }

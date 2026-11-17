@@ -127,6 +127,9 @@ class EventHandler: ObservableObject {
     /// The headset is off (visionOS put the app in the background) while a stream is up: the connection, the game audio and the
     /// tracking keep-alive go on, no picture is decoded or drawn. Main thread sets it, any thread reads it.
     var heldInBackground = false
+    /// The "Stream audio when headset removed" switch (GlobalSettings.streamAudioWhenHeadsetOff, set by the UI): off = the app leaves
+    /// when it goes to the background, as before 1.3.11.
+    var holdStreamWhenHeadsetOff = true
     /// The layer ended while the app was held: when the headset is back, the app re-enters the immersive space by itself
     var resumeAfterHold = false
     var backgroundHoldStart = 0.0
@@ -623,7 +626,7 @@ class EventHandler: ObservableObject {
     /// Render thread, the layer was invalidated and no link was lost: waits up to 1.5 s for the background state, which can
     /// arrive after the layer's end. True = the headset is off (keep the stream), false = the wearer left (the old path).
     func layerEndedWithHeadsetOff() -> Bool {
-        guard streamingActive else { return false }
+        guard streamingActive && holdStreamWhenHeadsetOff else { return false }
         for _ in 0..<15 {
             if appIsInBackground() { return true }
             Thread.sleep(forTimeInterval: 0.1)
@@ -663,7 +666,7 @@ class EventHandler: ObservableObject {
         if CACurrentMediaTime() - backgroundSince < 1.0 {
             return
         }
-        if streamingActive && alvrInitialized && CACurrentMediaTime() - backgroundSince < EventHandler.backgroundHoldMax {
+        if streamingActive && alvrInitialized && holdStreamWhenHeadsetOff && CACurrentMediaTime() - backgroundSince < EventHandler.backgroundHoldMax {
             if !heldInBackground {
                 heldInBackground = true
                 backgroundHoldStart = backgroundSince

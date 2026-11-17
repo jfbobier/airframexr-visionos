@@ -126,6 +126,7 @@ struct ALVRClientApp: App {
             }
             .task {
                 model.isShowingClient = false
+                EventHandler.shared.holdStreamWhenHeadsetOff = ALVRClientApp.gStore.settings.streamAudioWhenHeadsetOff
                 // The link was lost for a while (EventHandler.leaveStreamAfter): back to this window instead of a frozen scene or a
                 // dead app. client_core keeps listening, the streamer reconnects by itself, and auto-connect (if on) re-enters.
                 EventHandler.shared.onLeaveStream = {

@@ -26,6 +26,8 @@ struct GlobalSettings: Codable {
     var heightOffsetCm: Int = 0
     /// Enter the streamer as soon as the connection is up, without pressing Enter.
     var autoConnect: Bool = false
+    /// Headset off with a stream up: keep the connection and the game audio going (no picture) and come back when it is put on again.
+    var streamAudioWhenHeadsetOff: Bool = true
     /// FoV scale per axis (0.6 to 1.4) on the field of view declared to the streamer; 1.0 = the compositor's whole frustum.
     /// Horizontal scales the left and right edges, vertical the top and bottom edges.
     var fovScaleH: Float = 1.0
@@ -59,6 +61,7 @@ struct GlobalSettings: Codable {
         self.dismissWindowOnEnter = try container.decodeIfPresent(Bool.self, forKey: .dismissWindowOnEnter) ?? self.dismissWindowOnEnter
         self.heightOffsetCm = try container.decodeIfPresent(Int.self, forKey: .heightOffsetCm) ?? self.heightOffsetCm
         self.autoConnect = try container.decodeIfPresent(Bool.self, forKey: .autoConnect) ?? self.autoConnect
+        self.streamAudioWhenHeadsetOff = try container.decodeIfPresent(Bool.self, forKey: .streamAudioWhenHeadsetOff) ?? self.streamAudioWhenHeadsetOff
         // Before 1.3.6 one uniform factor (fovRenderScale) covered both axes: it becomes both, so nothing changes for existing installs.
         let legacyFovScale = try decoder.container(keyedBy: LegacyKeys.self).decodeIfPresent(Float.self, forKey: .fovRenderScale) ?? 1.0
         self.fovScaleH = try container.decodeIfPresent(Float.self, forKey: .fovScaleH) ?? legacyFovScale
