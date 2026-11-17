@@ -1,0 +1,87 @@
+--- a/alvr/client_core/src/storage.rs
++++ b/alvr/client_core/src/storage.rs
+@@ -20,6 +20,10 @@
+ pub struct Config {
+     pub hostname: String,
+     pub protocol_id: String,
++    // AirFrameXR: the server that last connected (its address as the handshake saw it). visionOS cannot send the UDP broadcast the
++    // announcer uses (no multicast entitlement), so the announce also goes straight to this address.
++    #[serde(default)]
++    pub last_server_ip: Option<String>,
+ }
+ 
+ impl Default for Config {
+@@ -35,6 +39,7 @@
+                 rng.random_range(0..10),
+             ),
+             protocol_id: alvr_common::protocol_id(),
++            last_server_ip: None,
+         }
+     }
+ }
+--- a/alvr/client_core/src/sockets.rs
++++ b/alvr/client_core/src/sockets.rs
+@@ -1,6 +1,6 @@
+ use alvr_common::{anyhow::Result, ALVR_NAME};
+ use alvr_sockets::{CONTROL_PORT, LOCAL_IP};
+-use std::net::{Ipv4Addr, UdpSocket};
++use std::net::{IpAddr, Ipv4Addr, UdpSocket};
+ 
+ pub struct AnnouncerSocket {
+     socket: UdpSocket,
+@@ -26,4 +26,11 @@
+ 
+         Ok(())
+     }
++
++    // AirFrameXR: the same packet, to one known server (a unicast needs no broadcast entitlement).
++    pub fn announce_unicast(&self, ip: IpAddr) -> Result<()> {
++        self.socket.send_to(&self.packet, (ip, CONTROL_PORT))?;
++
++        Ok(())
++    }
+ }
+--- a/alvr/client_core/src/connection.rs
++++ b/alvr/client_core/src/connection.rs
+@@ -145,6 +145,11 @@
+     let (mut proto_control_socket, server_ip) = {
+         let config = Config::load();
+         let announcer_socket = AnnouncerSocket::new(&config.hostname).to_con()?;
++        // AirFrameXR: the server that connected last time, announced to directly in every round below
++        let cached_server_ip = config
++            .last_server_ip
++            .as_deref()
++            .and_then(|ip| ip.parse::<std::net::IpAddr>().ok());
+         let listener_socket =
+             alvr_sockets::get_server_listener(HANDSHAKE_ACTION_TIMEOUT).to_con()?;
+ 
+@@ -162,6 +167,12 @@
+                 is_broadcast_ok = true;
+             }
+ 
++            if let Some(ip) = cached_server_ip {
++                if announcer_socket.announce_unicast(ip).is_ok() {
++                    is_broadcast_ok = true;
++                }
++            }
++
+             if let Ok(pair) = ProtoControlSocket::connect_to(
+                 DISCOVERY_RETRY_PAUSE,
+                 PeerType::Server(&listener_socket),
+@@ -182,6 +193,16 @@
+         }
+     };
+ 
++    // AirFrameXR: remember this server's address for the next start (written only when it changed)
++    {
++        let mut config = Config::load();
++        let ip = server_ip.to_string();
++        if config.last_server_ip.as_deref() != Some(ip.as_str()) {
++            config.last_server_ip = Some(ip);
++            config.store();
++        }
++    }
++
+     let mut connection_state_lock = ctx.state.write();
+     let disconnect_notif = Arc::new(Condvar::new());
+ 
