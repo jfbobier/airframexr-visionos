@@ -1,0 +1,86 @@
+diff --git a/alvr/client_core/src/c_api.rs b/alvr/client_core/src/c_api.rs
+index ee3b017e..99947c82 100644
+--- a/alvr/client_core/src/c_api.rs
++++ b/alvr/client_core/src/c_api.rs
+@@ -33,6 +33,7 @@ use std::{
+ 
+ static CLIENT_CORE_CONTEXT: OptLazy<ClientCoreContext> = alvr_common::lazy_mut_none();
+ static HUD_MESSAGE: Lazy<Mutex<String>> = Lazy::new(|| Mutex::new("".into()));
++static RESERVED_MESSAGE: Lazy<Mutex<String>> = Lazy::new(|| Mutex::new("".into()));
+ static SETTINGS: Lazy<Mutex<String>> = Lazy::new(|| Mutex::new("".into()));
+ static SERVER_VERSION: Lazy<Mutex<String>> = Lazy::new(|| Mutex::new("".into()));
+ static DECODER_CONFIG_BUFFER: Lazy<Mutex<Vec<u8>>> = Lazy::new(|| Mutex::new("".into()));
+@@ -86,6 +87,8 @@ pub enum AlvrEvent {
+     },
+     // Unimplemented
+     RealTimeConfig {},
++    /// AirFrameXR: read the text with alvr_reserved_message
++    ReservedMessage,
+ }
+ 
+ #[repr(C)]
+@@ -381,6 +384,11 @@ pub extern "C" fn alvr_poll_event(out_event: *mut AlvrEvent) -> bool {
+                     }
+                 }
+                 ClientCoreEvent::RealTimeConfig(_) => AlvrEvent::RealTimeConfig {},
++                ClientCoreEvent::ReservedMessage(text) => {
++                    *RESERVED_MESSAGE.lock() = text;
++
++                    AlvrEvent::ReservedMessage
++                }
+             };
+ 
+             unsafe { *out_event = event };
+@@ -394,6 +402,23 @@ pub extern "C" fn alvr_poll_event(out_event: *mut AlvrEvent) -> bool {
+     }
+ }
+ 
++/// AirFrameXR: the text of the last ReservedMessage event. Returns the length including the terminating zero; message_buffer can be null.
++#[no_mangle]
++pub extern "C" fn alvr_reserved_message(message_buffer: *mut c_char) -> u64 {
++    let cstring = CString::new(RESERVED_MESSAGE.lock().clone()).unwrap_or_default();
++    if !message_buffer.is_null() {
++        unsafe {
++            ptr::copy_nonoverlapping(
++                cstring.as_ptr(),
++                message_buffer,
++                cstring.as_bytes_with_nul().len(),
++            );
++        }
++    }
++
++    cstring.as_bytes_with_nul().len() as u64
++}
++
+ // Returns the length of the message. message_buffer can be null.
+ #[no_mangle]
+ pub extern "C" fn alvr_hud_message(message_buffer: *mut c_char) -> u64 {
+diff --git a/alvr/client_core/src/connection.rs b/alvr/client_core/src/connection.rs
+index a19d5a62..9919aed3 100644
+--- a/alvr/client_core/src/connection.rs
++++ b/alvr/client_core/src/connection.rs
+@@ -526,6 +526,11 @@ fn connection_pipeline(
+                                 .push_back(ClientCoreEvent::RealTimeConfig(config));
+                         }
+                     }
++                    Ok(ServerControlPacket::Reserved(text)) => {
++                        event_queue
++                            .lock()
++                            .push_back(ClientCoreEvent::ReservedMessage(text));
++                    }
+                     Ok(_) => (),
+                     Err(ConnectionError::TryAgain(_)) => {
+                         if Instant::now() > disconnection_deadline {
+diff --git a/alvr/client_core/src/lib.rs b/alvr/client_core/src/lib.rs
+index 279d999e..6b872ac3 100644
+--- a/alvr/client_core/src/lib.rs
++++ b/alvr/client_core/src/lib.rs
+@@ -56,6 +56,8 @@ pub enum ClientCoreEvent {
+         config_nal: Vec<u8>,
+     },
+     RealTimeConfig(RealTimeConfig),
++    /// AirFrameXR: the streamer's `ServerControlPacket::Reserved` text (docs/PICTURE_EDGES_DESIGN.md section 8: the headset view V)
++    ReservedMessage(String),
+ }
+ 
+ // Note: this struct may change without breaking network protocol changes

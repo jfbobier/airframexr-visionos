@@ -563,6 +563,9 @@ class Renderer {
 
         chromaKeyParams.setFunctionConstants(fragmentConstants)
         fragmentConstants.setConstantValue(&encodingGamma, type: .float, index: ALVRFunctionConstant.encodingGamma.rawValue)
+        var sharpen = EventHandler.shared.sharpenEnabled
+        sharpenBuilt = sharpen
+        fragmentConstants.setConstantValue(&sharpen, type: .bool, index: ALVRFunctionConstant.sharpenEnabled.rawValue)
         fragmentConstants.setConstantValue(&currentYuvTransform.columns.0, type: .float4, index: ALVRFunctionConstant.encodingYUVTransform0.rawValue)
         fragmentConstants.setConstantValue(&currentYuvTransform.columns.1, type: .float4, index: ALVRFunctionConstant.encodingYUVTransform1.rawValue)
         fragmentConstants.setConstantValue(&currentYuvTransform.columns.2, type: .float4, index: ALVRFunctionConstant.encodingYUVTransform2.rawValue)
@@ -602,6 +605,9 @@ class Renderer {
         planeUniformBufferOffset = alignedPlaneUniformSize * planeUniformBufferIndex
         planeUniforms = UnsafeMutableRawPointer(dynamicPlaneUniformBuffer.contents() + planeUniformBufferOffset).bindMemory(to:PlaneUniform.self, capacity:1)
     }
+
+    var lastDeclaredViewSerial = -1   // EventHandler.headsetViewSerial at the last declaration (-1: none yet)
+    var sharpenBuilt = false   // the sharpening switch the video pipelines were built with
 
     // Writes FOV/tangents/etc information to the uniform buffer.
     private func updateGameStateForVideoFrame(_ whichIdx: Int, drawable: LayerRenderer.Drawable?, viewTransforms: [simd_float4x4], sentViewTangents: [simd_float4], realViewTangents: [simd_float4], nearZ: Double, farZ: Double, framePose: simd_float4x4, simdDeviceAnchor: simd_float4x4) {
@@ -797,12 +803,11 @@ class Renderer {
             ipd = 0.063
             print(EventHandler.shared.lastIpd)
 #endif
-            // The FoV sliders are read when the view config is sent: at the first frame after Enter, and again if they changed
-            // since (leaving and entering again on the same connection).
-            let fovScaleH = max(fovScaleRange.lowerBound, min(fovScaleRange.upperBound, settings.fovScaleH))
-            let fovScaleV = max(fovScaleRange.lowerBound, min(fovScaleRange.upperBound, settings.fovScaleV))
-            let fovScaleChanged = EventHandler.shared.lastFovScale != simd_float2(fovScaleH, fovScaleV)
-            if abs(EventHandler.shared.lastIpd - ipd) > 0.001 || fovScaleChanged {
+            // 1.4: the box is the streamer's (EventHandler.headsetViewTangents, sent at connection and resent while streaming); the H / V FoV sliders
+            // are gone. Declared again when the IPD or the streamer's box changes.
+            let viewSerial = EventHandler.shared.headsetViewSerial
+            if abs(EventHandler.shared.lastIpd - ipd) > 0.001 || lastDeclaredViewSerial != viewSerial {
+                lastDeclaredViewSerial = viewSerial
                 print("Send view config")
                 
                 if EventHandler.shared.lastIpd != -1 {
@@ -810,7 +815,7 @@ class Renderer {
                         print("IPD changed!", EventHandler.shared.lastIpd, "->", ipd)
                     }
                     else {
-                        print("FoV scale changed:", fovScaleH, fovScaleV)
+                        print("Streamer box changed")
                     }
                 }
                 else {
@@ -832,21 +837,26 @@ class Renderer {
                 // rectangle, sent to the game as absolute tangents). 1.2.0-1.3.1 cut to a fixed box and left black bars for wider fits.
                 let limitedTangentsLeft = tangentsLeft
                 let limitedTangentsRight = tangentsRight
-                // FoV sliders (horizontal and vertical, 0.6 to 1.4): a factor per axis on what is declared, so the streamer renders, encodes and sends
-                // less (or more) angle at the same pixel count. 1.0 = the compositor's whole frustum, as the stock app. Equal values give exactly the
-                // old single FoV Scale result (see declaredFovAngles).
-                let leftAngles = declaredFovAngles(tangents: limitedTangentsLeft, scaleH: fovScaleH, scaleV: fovScaleV)
-                let rightAngles = mainDrawable.views.count > 1 ? declaredFovAngles(tangents: limitedTangentsRight, scaleH: fovScaleH, scaleV: fovScaleV) : leftAngles
+                let leftAngles = atan(limitedTangentsLeft)
+                let rightAngles = mainDrawable.views.count > 1 ? atan(limitedTangentsRight) : leftAngles
                 let leftFov = AlvrFov(left: -leftAngles.x, right: leftAngles.y, up: leftAngles.z, down: -leftAngles.w)
                 let rightFov = AlvrFov(left: -rightAngles.x, right: rightAngles.y, up: rightAngles.z, down: -rightAngles.w)
                 
-                let (leftFovCorrected, tangentsLeftCorrected, transformLeftCorrected) = mainDrawable._cantedViewToProportionalCircumscribedOrthogonal(fov: leftFov, viewTransform: transformLeft, fovPostScale: 1.0)
-                let (rightFovCorrected, tangentsRightCorrected, transformRightCorrected) = mainDrawable._cantedViewToProportionalCircumscribedOrthogonal(fov: rightFov, viewTransform: transformRight, fovPostScale: 1.0)
+                var (leftFovCorrected, tangentsLeftCorrected, transformLeftCorrected) = mainDrawable._cantedViewToProportionalCircumscribedOrthogonal(fov: leftFov, viewTransform: transformLeft, fovPostScale: 1.0)
+                var (rightFovCorrected, tangentsRightCorrected, transformRightCorrected) = mainDrawable._cantedViewToProportionalCircumscribedOrthogonal(fov: rightFov, viewTransform: transformRight, fovPostScale: 1.0)
+                // the streamer's box, in its own numbers (the circumscribed orthogonal view the PC receives): declared as it is, never wider than the
+                // compositor's, so the stream covers exactly the box the game is told (the PC's compose pass is then a copy)
+                if let box = EventHandler.shared.headsetViewTangents {
+                    func fovOf(_ t: simd_float4) -> AlvrFov { let a = atan(t); return AlvrFov(left: -a.x, right: a.y, up: a.z, down: -a.w) }
+                    tangentsLeftCorrected = simd_min(tangentsLeftCorrected, box[0]); leftFovCorrected = fovOf(tangentsLeftCorrected)
+                    tangentsRightCorrected = simd_min(tangentsRightCorrected, box[1]); rightFovCorrected = fovOf(tangentsRightCorrected)
+                    String(format: "[view] declared L %.3f/%.3f/%.3f/%.3f R %.3f/%.3f/%.3f/%.3f", tangentsLeftCorrected.x, tangentsLeftCorrected.y, tangentsLeftCorrected.z, tangentsLeftCorrected.w,
+                           tangentsRightCorrected.x, tangentsRightCorrected.y, tangentsRightCorrected.z, tangentsRightCorrected.w).withCString { alvr_log(UInt8(ALVR_LOG_LEVEL_ERROR.rawValue), $0) }
+                }
                 
                 EventHandler.shared.viewFovs = [leftFovCorrected, rightFovCorrected]
                 EventHandler.shared.viewTransforms = [fixTransform(transformLeftCorrected), mainDrawable.views.count > 1 ? fixTransform(transformRightCorrected) : fixTransform(transformLeftCorrected)]
                 EventHandler.shared.lastIpd = ipd
-                EventHandler.shared.lastFovScale = simd_float2(fovScaleH, fovScaleV)
                 
                 // Wait, is this correct?
                 if mainDrawable.views.count > 1 {
@@ -864,6 +874,9 @@ class Renderer {
             
             var needsPipelineRebuild = false
             if EventHandler.shared.encodingGamma != encodingGamma {
+                needsPipelineRebuild = true
+            }
+            if EventHandler.shared.sharpenEnabled != sharpenBuilt {   // the streamer's sharpening switch (a shader function constant)
                 needsPipelineRebuild = true
             }
             

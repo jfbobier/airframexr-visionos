@@ -103,6 +103,9 @@ fragment half4 hudFragmentShader(ColorInOut in [[stage_in]],
 // FFR_COMMON_SHADER_FORMAT
 
 constant bool FFR_ENABLED [[ function_constant(ALVRFunctionConstantFfrEnabled) ]];
+// AirFrameXR 1.4: the streamer's sharpening switch (ServerControlPacket::Reserved message); absent = off
+constant bool SHARPEN_ENABLED_IN [[ function_constant(ALVRFunctionConstantSharpenEnabled) ]];
+constant bool SHARPEN_ENABLED = is_function_constant_defined(SHARPEN_ENABLED_IN) ? SHARPEN_ENABLED_IN : false;
 constant uint2 TARGET_RESOLUTION [[ function_constant(ALVRFunctionConstantFfrCommonShaderTargetResolution) ]];
 constant uint2 OPTIMIZED_RESOLUTION [[ function_constant(ALVRFunctionConstantFfrCommonShaderOptimizedResolution) ]];
 constant float2 EYE_SIZE_RATIO [[ function_constant(ALVRFunctionConstantFfrCommonShaderEyeSizeRatio) ]];
@@ -420,6 +423,41 @@ half4 sampleCatmullRom5(texture2d<half> tex, float2 uv) {
     return result / half(weightSum);
 }
 
+// AMD FidelityFX CAS (contrast adaptive sharpening, MIT licence, GPUOpen) in its single-pass "sharpen and scale" form, on the luma plane only (edges are
+// luma; the chroma planes keep the bicubic filter): the four stored texels around the sample point are each sharpened from their own cross of neighbours,
+// with a weaker lobe where the local contrast is already high so edges do not ring, then interpolated bilinearly. 12 reads. AirFrameXR 1.4: the client
+// magnifies the stream about 1.2 to 1.7 x at the centre of the view (the Vision Pro samples up to 40 px/deg), which is the range CAS's scaling was made for.
+constant float CAS_SHARPNESS = 0.5;   // FidelityFX's range: 0 = mild, 1 = strong; fixed for the 1.4 experiment
+static float casTexel(texture2d<half> tex, int2 c, int2 maxc) {
+    return float(tex.read(uint2(clamp(c, int2(0), maxc))).r);
+}
+static float casSharpen(float c, float n, float s, float w, float e, float peak) {
+    const float mn = min(c, min(min(n, s), min(w, e)));
+    const float mx = max(c, max(max(n, s), max(w, e)));
+    const float amp = sqrt(saturate(min(mn, 1.0 - mx) / max(mx, 1.0e-4)));
+    const float wt = amp * peak;
+    return saturate((c + wt * (n + s + w + e)) / (1.0 + 4.0 * wt));
+}
+half sampleLumaCas(texture2d<half> tex, float2 uv) {
+    const int2 maxc = int2(int(tex.get_width()) - 1, int(tex.get_height()) - 1);
+    const float2 p = uv * float2(tex.get_width(), tex.get_height()) - 0.5;
+    const float2 f = fract(p);
+    const int2 b = int2(floor(p));
+    // the 4 x 4 block around the sample without its corners: t[y][x] at offsets x - 1, y - 1
+    float t[4][4];
+    for (int y = 0; y < 4; y++) {
+        for (int x = 0; x < 4; x++) {
+            t[y][x] = ((x == 0 || x == 3) && (y == 0 || y == 3)) ? 0.0 : casTexel(tex, b + int2(x - 1, y - 1), maxc);
+        }
+    }
+    const float peak = -1.0 / mix(8.0, 5.0, CAS_SHARPNESS);
+    const float v00 = casSharpen(t[1][1], t[0][1], t[2][1], t[1][0], t[1][2], peak);
+    const float v10 = casSharpen(t[1][2], t[0][2], t[2][2], t[1][1], t[1][3], peak);
+    const float v01 = casSharpen(t[2][1], t[1][1], t[3][1], t[2][0], t[2][2], peak);
+    const float v11 = casSharpen(t[2][2], t[1][2], t[3][2], t[2][1], t[2][3], peak);
+    return half(mix(mix(v00, v10, f.x), mix(v01, v11, f.x), f.y));
+}
+
 half3 videoFrameSampleYpCbCrBiPlanar(float2 texCoord, texture2d<half> in_tex_y, texture2d<half> in_tex_uv) {
     
     float2 sampleCoord;
@@ -437,7 +475,7 @@ half3 videoFrameSampleYpCbCrBiPlanar(float2 texCoord, texture2d<half> in_tex_y, 
     const float2 lumaSize = float2(in_tex_y.get_width(), in_tex_y.get_height());
     const float2 lumaFootprint = fwidth(sampleCoord) * lumaSize;
     const bool stretched = max(lumaFootprint.x, lumaFootprint.y) < 0.9;
-    half4 ySample = stretched ? sampleCatmullRom5(in_tex_y, sampleCoord) : in_tex_y.sample(colorSampler, sampleCoord);
+    half4 ySample = stretched ? (SHARPEN_ENABLED ? half4(sampleLumaCas(in_tex_y, sampleCoord)) : sampleCatmullRom5(in_tex_y, sampleCoord)) : in_tex_y.sample(colorSampler, sampleCoord);
     // The chroma planes are half resolution (4:2:0), so they are always stretched against the luma: bicubic everywhere.
     half4 uvSample = sampleCatmullRom5(in_tex_uv, sampleCoord);
     half4 ycbcr = half4(ySample.r, uvSample.rg, 1.0f);

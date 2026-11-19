@@ -74,28 +74,12 @@ struct Entry: View {
             .padding(.horizontal)
             .padding(.top)
 
-            VStack(spacing: 14) {
-                Toggle(isOn: Binding(
-                    get: { !gStore.settings.fovCustom },
-                    set: { isDefault in
-                        if isDefault {
-                            gStore.settings.fovScaleH = 1.0
-                            gStore.settings.fovScaleV = 1.0
-                        }
-                        gStore.settings.fovCustom = !isDefault
-                        saveAction()
-                    }
-                )) {
-                    Text("Default FoV")
-                }
-                .toggleStyle(.switch)
-                if gStore.settings.fovCustom {
-                    FovSliderRow(title: "Horizontal FoV", value: $gStore.settings.fovScaleH, saveAction: saveAction)
-                    FovSliderRow(title: "Vertical FoV", value: $gStore.settings.fovScaleV, saveAction: saveAction)
-                }
-            }
-            .padding(.horizontal)
-            .padding(.top)
+            // 1.4: the field of view and the picture are set in the streamer on the PC (the H / V FoV sliders are gone)
+            Text("Field of view and picture: set in the streamer on the PC")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal)
+                .padding(.top)
 
             VStack {
                 Toggle(isOn: Binding(
@@ -162,40 +146,3 @@ struct Entry: View {
     }
 }
 
-/// A FoV slider (0.6 to 1.4) with the middle, 1.0, marked on the track (the value is printed next to the title).
-/// Values are snapped to the 0.05 grid so 1.0 is exactly 1.0 (not 0.99999994), which the declared field of view relies on
-/// to equal the stock frustum.
-struct FovSliderRow: View {
-    let title: String
-    @Binding var value: Float
-    let saveAction: () -> Void
-
-    private var snapped: Binding<Float> {
-        Binding(
-            get: { value },
-            set: { value = (min(fovScaleRange.upperBound, max(fovScaleRange.lowerBound, $0)) * 20).rounded() / 20 }
-        )
-    }
-
-    var body: some View {
-        VStack(spacing: 4) {
-            HStack {
-                Text(title)
-                Spacer()
-                Text(String(format: "%.2f", value))
-                    .monospacedDigit()
-            }
-            ZStack {
-                Capsule()
-                    .fill(.secondary)
-                    .frame(width: 3, height: 20)
-                Slider(value: snapped, in: fovScaleRange, step: 0.05) {
-                    Text(title)
-                }
-            }
-        }
-        .onChange(of: value) {
-            saveAction()
-        }
-    }
-}

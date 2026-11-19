@@ -210,6 +210,46 @@ class EventHandler: ObservableObject {
     var decoderRebuildPending = false
     var backgroundSince: Double = 0
     var lastIpd: Float = -1
+    /// AirFrameXR 1.4 (docs/FOV_CONTRACT_PLAN.md in the AirFrameXR repo): the box the streamer chose for this connection, per eye, in the order of the
+    /// declared tangents (left, right, up, down), the PC's numbers (after the canted views are circumscribed). nil = none sent (an older streamer): the
+    /// client declares the compositor's whole frustum. The bump of the serial makes the renderer declare again. Ported from the 1.4 research line (1ce5bb4).
+    var headsetViewTangents: [simd_float4]? = nil
+    var headsetViewSerial = 0
+    /// the streamer's sharpening switch for the video pass (AMD FidelityFX CAS on the magnified luma); off without a streamer message
+    var sharpenEnabled = false
+    private let headsetViewLock = NSLock()
+
+    /// `{"airframexr":1,"view":{"left":[outer,inner,upper,lower],"right":[...]},"sharpen":true}` over ServerControlPacket::Reserved (resent about once a
+    /// second while streaming); anything else is ignored.
+    func applyReservedMessage(_ text: String) {
+        guard let data = text.data(using: .utf8),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              (root["airframexr"] as? NSNumber)?.intValue == 1 else { return }
+        var view: [simd_float4]? = nil
+        if let v = root["view"] as? [String: Any],
+           let l = (v["left"] as? [NSNumber])?.map({ $0.floatValue }), l.count == 4,
+           let r = (v["right"] as? [NSNumber])?.map({ $0.floatValue }), r.count == 4,
+           (l + r).allSatisfy({ $0.isFinite && $0 > 0.05 }) {
+            // the left eye's outer edge is its left one; the right eye's outer edge is its right one
+            view = [simd_float4(l[0], l[1], l[2], l[3]), simd_float4(r[1], r[0], r[2], r[3])]
+        }
+        let sharpen = (root["sharpen"] as? Bool) ?? false
+        if setHeadsetView(view, sharpen: sharpen) {
+            let desc = view.map { "L \($0[0]) R \($0[1])" } ?? "none"
+            "[view] streamer box: \(desc), sharpen \(sharpen)".withCString { alvr_log(UInt8(ALVR_LOG_LEVEL_ERROR.rawValue), $0) }   // error level: the only level the streamer logs while streaming
+        }
+    }
+
+    /// true when something changed
+    @discardableResult
+    func setHeadsetView(_ view: [simd_float4]?, sharpen: Bool = false) -> Bool {
+        headsetViewLock.lock(); defer { headsetViewLock.unlock() }
+        let same = (view == nil && headsetViewTangents == nil) || (view != nil && headsetViewTangents != nil && view! == headsetViewTangents!)
+        if same && sharpen == sharpenEnabled { return false }
+        if !same { headsetViewTangents = view; headsetViewSerial += 1 }
+        sharpenEnabled = sharpen
+        return true
+    }
     /// The (horizontal, vertical) FoV scale last declared to the streamer.
     var lastFovScale = simd_float2(1, 1)
     var viewTransforms: [simd_float4x4] = [matrix_identity_float4x4, matrix_identity_float4x4]
@@ -1087,6 +1127,7 @@ class EventHandler: ObservableObject {
                 print("streaming started \(alvrEvent.STREAMING_STARTED)")
                 updateHostVersion()
                 numberOfEventThreadRestarts = 0
+                setHeadsetView(nil)   // the box is per connection: the streamer sends it again after this event
                 
                 encodingGamma = alvrEvent.STREAMING_STARTED.encoding_gamma
                 negotiatedRefreshRate = alvrEvent.STREAMING_STARTED.refresh_rate_hint
@@ -1108,6 +1149,7 @@ class EventHandler: ObservableObject {
                 Settings.clearSettingsCache()
             case ALVR_EVENT_STREAMING_STOPPED.rawValue:
                 print("streaming stopped")
+                setHeadsetView(nil)
                 if renderStarted && streamLostSince == nil { streamLostSince = CACurrentMediaTime() }
                 if streamingActive {
                     streamingActive = false
@@ -1175,6 +1217,14 @@ class EventHandler: ObservableObject {
                 //WorldTracker.shared.needsRecenterTrigger = true
              case ALVR_EVENT_REAL_TIME_CONFIG.rawValue:
                 print("TODO real-time config")
+            case ALVR_EVENT_RESERVED_MESSAGE.rawValue:
+                let n = Int(alvr_reserved_message(nil))
+                if n > 1 {
+                    let buf = UnsafeMutablePointer<CChar>.allocate(capacity: n)
+                    alvr_reserved_message(buf)
+                    applyReservedMessage(String(cString: buf))
+                    buf.deallocate()
+                }
              default:
                  print("unknown msg")
              }

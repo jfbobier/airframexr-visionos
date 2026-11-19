@@ -89,4 +89,5 @@ typedef NS_ENUM(EnumBackingType, ALVRFunctionConstant)
     ALVRFunctionConstantEncodingYUVTransform1 = 305,
     ALVRFunctionConstantEncodingYUVTransform2 = 306,
     ALVRFunctionConstantEncodingYUVTransform3 = 307,
+    ALVRFunctionConstantSharpenEnabled = 400,   // AirFrameXR 1.4: AMD FidelityFX CAS on the magnified luma (the streamer's switch)
 };
