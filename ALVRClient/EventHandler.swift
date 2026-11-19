@@ -132,6 +132,8 @@ class EventHandler: ObservableObject {
     var holdStreamWhenHeadsetOff = true
     /// The layer ended while the app was held: when the headset is back, the app re-enters the immersive space by itself
     var resumeAfterHold = false
+    /// The space is opened again on purpose (the layer stayed paused after a hold): the render loop ends without alvr_pause() or exit(0)
+    var reenterRequested = false
     var backgroundHoldStart = 0.0
     /// Longest time a held stream is kept with the headset off or the app out of sight (a bound, not a setting): the PC keeps
     /// playing the game for this long, then the app leaves as it always did.
@@ -688,9 +690,24 @@ class EventHandler: ObservableObject {
                 resetEncoding()
                 timeLastFrameGot = CACurrentMediaTime()
                 timeLastFrameSent = CACurrentMediaTime()
+                // 1.4 (headset test 2026-11-19: frames arrived after the hold, none decoded for 30 s): visionOS can invalidate the
+                // decoder session while the app is in the background, so the next frame builds a new one from the saved parameter sets
+                objc_sync_enter(frameQueueLock)
+                if decoderConfigBytes != nil && currentCodec != ALVR_CODEC_AV1.rawValue { decoderRebuildPending = true }
+                objc_sync_exit(frameQueueLock)
                 if resumeAfterHold {
                     resumeAfterHold = false
                     if let resume = onResumeStream { resume() }
+                } else {
+                    // the layer was only paused during the hold. Same test: no tracking came after the resume, the render loop never ran
+                    // again. If the space has not rendered a frame 2 s after the headset is back, it is opened again (the stream goes on).
+                    let backAt = CACurrentMediaTime()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [self] in
+                        guard streamingActive, !heldInBackground, framesRendered == 0, let resume = onResumeStream else { return }
+                        streamLog(String(format: "the immersive space did not render again %.1f s after the headset came back: opening it again", CACurrentMediaTime() - backAt))
+                        reenterRequested = true
+                        resume()
+                    }
                 }
             }
             if backgroundSince != 0 {

@@ -620,7 +620,9 @@ struct VideoHandler {
             callback(imageBuffer)
         }
         if err != 0 {
-            //fatalError("VTDecompressionSessionDecodeFrame")
+            // 1.4: a frame the session refuses outright (kVTInvalidSessionErr after the app was in the background) never reaches the
+            // output handler above: report it as a failed decode, so EventHandler.noteDecodeFailure rebuilds the session after a second
+            callback(nil)
         }
     }
     

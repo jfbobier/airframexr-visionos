@@ -62,7 +62,13 @@ class MetalClientSystem {
         EventHandler.shared.handleHeadsetRemovedOrReentry()
         let timeSinceLastLoop = CACurrentMediaTime()
         while EventHandler.shared.renderStarted {
-            if layerRenderer.state == .invalidated && EventHandler.shared.leaveRequested {
+            if layerRenderer.state == .invalidated && EventHandler.shared.reenterRequested {
+                // the app closes the space to open it again after a hold (EventHandler.exitIfBackgrounded): no alvr_pause, no exit(0)
+                EventHandler.shared.streamLog("Layer invalidated to open the space again after the headset came back: keeping the stream")
+                EventHandler.shared.reenterRequested = false
+                EventHandler.shared.renderStarted = false
+                break
+            } else if layerRenderer.state == .invalidated && EventHandler.shared.leaveRequested {
                 // the app left the space itself (link lost): no alvr_pause, no exit(0), the Entry window is back
                 print("Layer is invalidated: left on a lost link")
                 EventHandler.shared.handleHeadsetRemovedOrReentry()
@@ -94,7 +100,11 @@ class MetalClientSystem {
                 }
                 break
             } else if layerRenderer.state == .paused {
+                let pausedAt = CACurrentMediaTime()
                 layerRenderer.waitUntilRunning()
+                if CACurrentMediaTime() - pausedAt > 1.0 {
+                    EventHandler.shared.streamLog(String(format: "layer %@ after %.1f s paused", layerRenderer.state == .running ? "running again" : "ended", CACurrentMediaTime() - pausedAt))
+                }
                 //EventHandler.shared.handleHeadsetRemovedOrReentry()
                 continue
             } else {
