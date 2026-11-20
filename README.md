@@ -33,10 +33,7 @@ Everything below is in the `airframexr-client` branch on top of upstream `main`.
   the Vision Pro profile, 0.97 / 0.71 / 0.69 / 0.63) and only changes what the game renders. 1.2.0 to 1.3.1 cut the
   declared box to a fixed ceiling (1.03 / 0.79 / 0.75 / 0.86) instead: sharper, but black bars for wearers who see
   past it. Measurement and numbers: `docs/AVP_FOV.md` and `docs/FOV_CALIBRATION.md` in the AirFrameXR repository.
-  The **Default FoV** switch (on = the stock app, both axes 1.0, turning it on resets them) hides or shows two **FoV sliders** (Horizontal and Vertical, 0.6 to 1.4, 1.0 in the middle) that scale the
-  declared box per axis: less angle for the same stream (denser pixels, a cheaper game) at the price of the edges, more
-  angle (above 1.0) the other way. With both equal the result is the same as the single FoV Scale of 1.3.5. They are read when
-  you press Enter.
+  From 1.4.0 the streamer owns the field of view and the app has no FoV sliders (see 1.4.0 below).
 - The chroma key is taken from the streamer's settings (`video.passthrough`), so the key colour and distance are
   set once, on the PC. Keyed pixels are written transparent and everything the frame does not cover is black:
   you see the room between games (the streamer's idle colour) and around the desktop mirror's screen (its
@@ -62,9 +59,13 @@ Everything below is in the `airframexr-client` branch on top of upstream `main`.
 
 **Window**
 
-- One column: connection status, the height line (HMD + offset = game height) with its offset slider, the Default FoV switch (and the two FoV sliders when it is off),
-  two switches (Proximity chaperone, Auto-connect) and Enter. No settings that duplicate the PC's.
-- Auto-connect enters the stream as soon as the streamer connects.
+- One column (1.4.0): logo with the version, connection status with a coloured dot, the **Auto-connect** card, the height line
+  (HMD + offset = game height) with its offset slider, the switches (Proximity chaperone, Stream audio when headset removed,
+  Auto-recenter on stream start, Flat2VR mode for PSVR2 buttons), the recenter hint and Enter. No settings that duplicate the PC's.
+- Auto-connect enters the stream as soon as the streamer connects. It has its own card at the top of the window, tinted green when
+  on, because it changes how the app behaves: with it on you are taken into the stream before you can touch anything. To change a
+  setting, leave the stream first (Digital Crown), change it, then Enter again: it fires on the connection edge, so leaving on
+  purpose does not pull you back in until the next connection.
 - App name and icon: AirFrameXR.
 
 **Building and shipping**
@@ -81,6 +82,30 @@ Everything below is in the `airframexr-client` branch on top of upstream `main`.
 
 Same as upstream: see the [Building](https://github.com/alvr-org/alvr-visionos/wiki/Building) wiki page. The CI
 workflow files show the exact commands (Rust client core, cbindgen, `repack_alvr_client.sh`, then `xcodebuild`).
+
+## 1.4.0
+
+Built in CI and sent to TestFlight; **not tried on a headset**, and nothing of it was compiled locally (no Xcode on the dev machine).
+
+- **The streamer owns the field of view.** The H / V FoV sliders and the Default FoV switch are gone. The streamer sends one box per
+  connection (over `ServerControlPacket::Reserved`, a client_core patch) and the app declares it as it is, clamped to the compositor's
+  circumscribed frustum. With no message (an older streamer) the app declares the compositor's whole frustum, as before. Design:
+  `docs/FOV_CONTRACT_PLAN.md` in the AirFrameXR repository.
+- **Sharpening on the magnified luma (AMD FidelityFX CAS, MIT).** A single-pass "sharpen and scale" form of contrast adaptive sharpening on the
+  luma plane only, for the 1.2 to 1.7 x magnification at the centre of the view. Off unless the streamer switches it on in the same
+  message; the Catmull-Rom reconstruction of 1.3.8 stays the default.
+- **Auto-recenter on stream start** (switch, off by default, `autoRecenterOnStart`): about 90 poses after a stream starts, the head's floor
+  position and heading become the stream's origin.
+- **Recenter = Create + Options** on the PSVR2 Sense controllers: pressing both at once recenters the same way (`recenterOnHead`).
+  While the other button is down a press is not sent to the game, so Create does not pause UEVR games. Only the yaw and the floor position
+  change; a long Digital Crown press (visionOS's own recenter) is separate. The old triple-press detection only runs with
+  `keepSteamVRCenter`, which nothing in the app sets.
+- **Flat2VR mode for PSVR2 buttons** (switch, on by default, `flat2vrButtons`): Flat2VR games assume an Xbox controller (Create = View,
+  Options = Menu). **The setting is stored but not wired**: the Quest 2 emulation the stream uses has no View button, so the mapping
+  needs a streamer-side gamepad profile or a decision on which Touch inputs to reuse.
+- **Entry window**: Auto-connect card, version line, connection dot (above).
+- Video after a headset-off hold: a frame VideoToolbox refuses counts as a failed decode, the decoder is rebuilt from the saved parameter
+  sets after a hold, and the immersive space is opened again if it has not rendered 2 s after the headset is back.
 
 ## 1.3.11
 
