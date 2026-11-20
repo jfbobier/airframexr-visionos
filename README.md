@@ -103,6 +103,14 @@ Built in CI and sent to TestFlight; **not tried on a headset**, and nothing of i
 - **Flat2VR mode for PSVR2 buttons** (switch, on by default, `flat2vrButtons`): Flat2VR games assume an Xbox controller (Create = View,
   Options = Menu). **The setting is stored but not wired**: the Quest 2 emulation the stream uses has no View button, so the mapping
   needs a streamer-side gamepad profile or a decision on which Touch inputs to reuse.
+- **Audio keep-alive ("Stream audio when headset removed")** (switch, on by default, `streamAudioWhenHeadsetOff`, from 1.3.11). Take the
+  headset off with a stream up and the connection stays: the game keeps running and its audio keeps playing, no picture is decoded
+  while the headset is off, and the picture comes back when it is put on again (the decoder is rebuilt from the saved parameter sets with a
+  keyframe, and the immersive space is opened again if it has not rendered 2 s after). The app is kept alive in the background for up to
+  30 min (`backgroundHoldMax`, a bound, not a setting) with `UIBackgroundModes: audio`, the audio session left on and fake tracking sent so
+  the streamer does not see the headset vanish; after that, or with the switch off, the app leaves as it did before 1.3.11.
+  Not tried on a headset for the full time: what is still unknown is how long visionOS lets the app run in the background and whether the
+  headset plays the audio while not worn. The `[stream] ...background...` lines in the streamer log show what happened.
 - **Entry window**: Auto-connect card, version line, connection dot (above).
 - Video after a headset-off hold: a frame VideoToolbox refuses counts as a failed decode, the decoder is rebuilt from the saved parameter
   sets after a hold, and the immersive space is opened again if it has not rendered 2 s after the headset is back.
