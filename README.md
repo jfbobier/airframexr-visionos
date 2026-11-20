@@ -1,303 +1,198 @@
-# AirFrameXR client for Apple Vision Pro
+# AirFrameXR for Apple Vision Pro
 
-The visionOS client of [AirFrameXR](https://github.com/jfbobier/AirFrameXR), wireless PC VR for NVIDIA cards: the
-PC runs the game through AirFrameXR's OpenXR runtime (frame generation, foveated encoding, NVENC), streams it with
-the ALVR v20 protocol, and this app shows it on the Vision Pro with hand and PlayStation VR2 Sense controller
-tracking.
+The visionOS client of [AirFrameXR](https://github.com/jfbobier/AirFrameXR): wireless PC VR for NVIDIA graphics cards. The PC runs
+the game through AirFrameXR's OpenXR runtime (frame generation, foveated encoding, NVENC) and streams it with the ALVR v20
+protocol. This app shows the stream on the Vision Pro and sends back head tracking and controller input.
 
-Version 1.3.11 (numbered with the AirFrameXR streamer it pairs with). Nearly feature complete; what is left is listed at the end.
+Version 1.4.0 (numbered with the AirFrameXR streamer it pairs with). Written and tested by one person: what was tried on a
+headset, and what was not, is in [docs/CHANGELOG.md](docs/CHANGELOG.md).
 
-## Credits
+---
 
-This app is a fork of [ALVR for Apple visionOS](https://github.com/alvr-org/alvr-visionos), written by
-[Max Thomas (shinyquagsire23)](https://github.com/shinyquagsire23) and the alvr-org contributors, among them
-panthurrr, zhuowei, shadowfacts, dereklucas, sidd, jfenton, svrc and robbiet480. The renderer, the tracking, the
-ALVR client core integration, the controller and hand input, the chroma key and the TestFlight-ready project are
-theirs. The streaming protocol and the client core are [ALVR](https://github.com/alvr-org/ALVR). Both are MIT
-licensed and so is this fork (see `LICENSE`).
+# Part 1: User manual
 
-## What this fork adds
+## What you need
 
-Everything below is in the `airframexr-client` branch on top of upstream `main`.
+- An Apple Vision Pro. The PSVR2 Sense controllers need visionOS 26 or later; visionOS 27 is what the app is built against.
+- A Windows PC with an NVIDIA graphics card running the AirFrameXR streamer, on the same network. The app finds the PC by itself.
+- A controller: PlayStation VR2 Sense controllers (best supported), a Steam Controller, or a gamepad (DualSense, Xbox, Joy-Con).
+  Your hands do not reach the game: there is no pinch input.
 
-**Picture**
+## The window
 
-- Metal renderer only. The RealityKit renderer and its options are removed, so there is one code path to tune.
-- Reconstruction filters, always on (1.3.8): the colour planes (4:2:0, half resolution) are rebuilt with a bicubic
-  (Catmull-Rom) filter instead of the bilinear one the hardware formats use, and the luma gets the same filter where the
-  encoded picture is stretched on screen (the periphery of a foveated stream, a small stream shown large). Where one
-  encoded pixel covers one screen pixel the picture is unchanged. Colour edges are cleaner and the stretched areas sharper;
-  nothing is sharpened or added, so any sharpening stays on the streamer. Details under 1.3.8.
-- Field of view: the app declares the frustum the compositor asks for, as the stock app does at FoV Scale 1, so an
-  uncalibrated wearer sees the whole panel. The wearer's own rectangle is set on the PC (the streamer's FOV card or
-  the Vision Pro profile, 0.97 / 0.71 / 0.69 / 0.63) and only changes what the game renders. 1.2.0 to 1.3.1 cut the
-  declared box to a fixed ceiling (1.03 / 0.79 / 0.75 / 0.86) instead: sharper, but black bars for wearers who see
-  past it. Measurement and numbers: `docs/AVP_FOV.md` and `docs/FOV_CALIBRATION.md` in the AirFrameXR repository.
-  From 1.4.0 the streamer owns the field of view and the app has no FoV sliders (see 1.4.0 below).
-- The chroma key is taken from the streamer's settings (`video.passthrough`), so the key colour and distance are
-  set once, on the PC. Keyed pixels are written transparent and everything the frame does not cover is black:
-  you see the room between games (the streamer's idle colour) and around the desktop mirror's screen (its
-  background is that colour), never past the frame's edge, and a game, which paints its own picture, is opaque.
+When you open the app you see one window, from top to bottom:
 
-**Space**
+1. **The logo and the version**, and the **connection status** with a coloured dot: orange while it looks for your PC, green when it is
+   connected to it.
+2. **The Auto-connect card** (see below).
+3. **The height line**, for example `HMD 1.62 m + offset +5 cm = 1.67 m`: the height the headset reports, your offset, and what the game
+   gets as your eye height. The slider moves the offset by up to 50 cm either way. Use it if the game puts you too low or too high.
+4. **The switches**: Proximity chaperone, Stream audio when headset removed, Auto-recenter on stream start, Flat2VR mode for PSVR2 buttons.
+5. **The recenter reminder**: Recenter = Create + Options.
+6. **Enter**, which starts the stream once the PC is connected. It reads "Connecting..." until then.
 
-- Floor height: the height the headset reports is shown live in the window, with a manual offset (plus or minus
-  50 cm) that is added to it. The sum is what the game sees as your eye height.
-- Head pose as stock: the head is sampled at the display time; the client core predicts by the pipeline latency.
+The field of view, the sharpness and the picture settings are not here: they are set once, on the PC, in the AirFrameXR streamer.
 
-**Hands and controllers**
+## Auto-connect
 
-- No hand input: your hands never reach the game (no pinch click, no hand controller pose, no hand skeleton).
-  Input comes from PlayStation VR2 Sense controllers, a Steam Controller or a gamepad (DualSense, Xbox, Joy-Con).
-  Removed in 1.3.1 because the pinch kept sending commands nobody gave.
-- PlayStation VR2 Sense controllers: tested in game. The small Create (left) and Options (right) buttons reach the
-  game as that hand's menu button, kept distinct because games bind them to different things. The PS button is
-  not available to any app: visionOS 27 does not expose it in the controller's input profile, so the Home Button
-  Overrides setting has nothing to act on and the PS button opens the Home View whatever you set. The app asks
-  for it anyway, which will matter on controllers that do expose their Home button, and writes one `[home]`
-  line per controller into the streamer log with what the profile contains.
+With Auto-connect on, the app enters the stream by itself the moment your PC is found: put the headset on, start the streamer, and you
+are in. It has its own card at the top, tinted green when on, because it changes how the app behaves.
 
-**Window**
+**To change a setting while Auto-connect is on, leave the stream first** (press the Digital Crown), change the setting in the window, then
+press Enter again. You are not pulled back in while the connection is still up: auto-connect only fires when the connection is made, so
+leaving on purpose keeps you in the window until the next connection. When the stream is lost for more than a minute, the app leaves the
+stream and Auto-connect enters again when the PC is found.
 
-- One column (1.4.0): logo with the version, connection status with a coloured dot, the **Auto-connect** card, the height line
-  (HMD + offset = game height) with its offset slider, the switches (Proximity chaperone, Stream audio when headset removed,
-  Auto-recenter on stream start, Flat2VR mode for PSVR2 buttons), the recenter hint and Enter. No settings that duplicate the PC's.
-- Auto-connect enters the stream as soon as the streamer connects. It has its own card at the top of the window, tinted green when
-  on, because it changes how the app behaves: with it on you are taken into the stream before you can touch anything. To change a
-  setting, leave the stream first (Digital Crown), change it, then Enter again: it fires on the connection edge, so leaving on
-  purpose does not pull you back in until the next connection.
-- App name and icon: AirFrameXR.
+Off by default.
 
-**Building and shipping**
+## Switches
 
-- GitHub Actions build on an Xcode 27 runner (`.github/workflows/`), including a TestFlight workflow that
-  archives, signs with an App Store Connect API key and uploads, with an unsigned check mode that needs no
-  account. No Mac is needed. Set-up guide for the account holder: `docs/TESTFLIGHT.md`. Every signed run creates a
-  certificate on the Apple team and Apple caps their number; the workflow's "Revoke the certificates earlier runs
-  created" input deletes the ones made through the API before signing.
-- The ReplayKit eye-broadcast extension and the app group are removed, so a plain developer account suffices.
+**Proximity chaperone** (off by default). When your hands or controllers come within 30 cm of a wall or a piece of furniture the headset has
+mapped, the surface is drawn in the game and the controller pulses. It is a safety net, not a boundary: it only knows what the headset has
+seen.
+
+**Stream audio when headset removed** (on by default). Take the headset off to open the door and the game keeps running and its audio keeps
+playing, with no picture. Put the headset back on and the picture returns by itself. The app stays alive in the background for up to 30
+minutes this way; after that, or with the switch off, taking the headset off ends the session as it did before. Not tried for the full 30
+minutes on a headset: how long visionOS lets the app run in the background is the unknown.
+
+**Auto-recenter on stream start** (off by default). A moment after each stream starts, your head's position on the floor and the way you are
+facing become the centre of the game. Useful when you start the game from a different spot or direction every time.
+
+**Flat2VR mode for PSVR2 buttons** (on by default). Flat2VR games are built for an Xbox controller: Create is View and Options is Menu. This
+switch is the place for that mapping. **It has no effect yet**: the stream is seen by the game as a Quest 2 controller, which has no View
+button, so the mapping needs a streamer-side change first. The setting is saved so it will keep its value when the mapping arrives.
+
+## Recentering
+
+- **Create + Options together** (the small buttons on the two PSVR2 Sense controllers): press both at once and the game's centre moves to
+  where your head is, facing the way you look. Only your position on the floor and your heading change; the floor stays the floor. While
+  both are down, the buttons are not sent to the game, so Create does not pause games that use it as Pause. If your left press lands a
+  few milliseconds before the right one, a game can still see a short pause.
+- **Long press on the Digital Crown**: the visionOS recenter. It works as it always does.
+- **Auto-recenter on stream start**: the switch above.
+
+## The PSVR2 Sense controllers
+
+The small Create (left) and Options (right) buttons reach the game as that hand's menu button, and are kept distinct because games bind
+them to different things. In most games only the left one does anything (usually Pause), and the right one does nothing. The PS button
+is not available to any app: visionOS does not pass it on, so it opens the Home View whatever you set, and the app cannot change that.
+
+## If something goes wrong
+
+- **Black picture or bars**: the field of view is the streamer's. Check the FOV settings on the PC.
+- **The stream freezes**: the app stays in the stream and resumes by itself when the PC is back. After 60 seconds without a stream it
+  returns to the window.
+- **The app was not found / does not connect**: both devices must be on the same network. The streamer's log (`AirFrameXR.log` on the
+  PC) holds `[stream]`, `[view]` and `[home]` lines from the headset that say what happened.
+
+---
+
+# Part 2: Technical architecture
+
+## Overview
+
+```
+Game (OpenXR / OpenVR via OpenComposite)
+   -> AirFrameXR runtime (VDXR + ovrshim) -> host (frame generation, foveation, NVENC)
+   -> ALVR v20 protocol over the network (video, audio, tracking, buttons, one small control channel)
+   -> this app: decode (VideoToolbox) -> Metal renderer -> visionOS compositor
+```
+
+This repository is the last box. The PC side lives in the AirFrameXR repository (`docs/ARCHITECTURE.md` there).
+
+## The app
+
+- **Entry window** (`ALVRClient/Entry/`): SwiftUI. Connection state, the settings above, the Enter control. Settings are in
+  `GlobalSettings.swift` and saved to the device as JSON; unknown or old keys are ignored.
+- **Event handler** (`EventHandler.swift`): owns the connection. It reads events from the ALVR client core (Rust, linked as a
+  static library), starts and stops the decoder, holds the stream through short background states, and applies the 60 s link-loss rule.
+- **Decoder** (`VideoHandler.swift`, `NALParser.swift`): H.264, HEVC or AV1 NAL units into VideoToolbox. A decoder is rebuilt when the stream
+  configuration changes, when a frame is refused after a background, or when a second of frames shows no picture.
+- **Renderer** (`Renderer.swift`, `MetalClientSystem.swift`, `Shaders.metal`): a Metal layer in a fully immersive space. The video is read
+  as plain luma and chroma planes and converted in the shader with the stream's own YCbCr matrix.
+- **Tracking and input** (`WorldTracker.swift`, `Input/`): head pose sampled at display time and predicted by the client core's pipeline
+  latency; controller poses and buttons mapped onto the Quest 2 (Touch) paths the streamer expects; Steam Controller over Bluetooth
+  (`Input/SteamControllerDevice.swift`); proximity chaperone from ARKit planes (`ChaperoneSystem.swift`).
+- **Frame pick**: each display tick takes the newest decoded frame, waiting up to 8 ms for a late one (stock 5 ms).
+- **Refresh rate**: when the streamer asks for 90 Hz the app asks visionOS for 100 Hz (the 100 Hz mode missed fewer deadlines in
+  measurement). It is a request visionOS may refuse.
+
+## Picture pipeline
+
+- **Chroma**: the half-resolution colour planes are reconstructed with a Catmull-Rom filter (five bilinear taps with renormalised weights)
+  instead of the bilinear one the hardware formats use. Colour edges are tighter.
+- **Luma**: the same filter where one stored texel covers more than about one screen pixel (the foveated periphery, a stream encoded below
+  the screen's resolution); the plain sample elsewhere.
+- **Sharpening (1.4)**: an optional single-pass AMD FidelityFX **Contrast Adaptive Sharpening (CAS)** in its "sharpen and scale" form,
+  on the luma plane only. It is made for the 1.2 to 1.7 x magnification at the centre of the view (the Vision Pro samples up to 40
+  pixels per degree). It is **off unless the streamer switches it on**; sharpness is a streamer setting, never an app setting.
+- **Chroma key**: taken from the streamer's settings. Keyed pixels are written transparent; everything the frame does not cover is
+  black, or transparent when the picture's own edge is the key colour, so the room shows between games and around the desktop mirror.
+
+## The streamer owns the field of view (1.4)
+
+The app does not have field-of-view settings. For each connection the streamer decides which box of the headset's view the game renders
+and sends it over the ALVR v20 `Reserved` control packet, a small JSON message resent about once a second:
+
+```
+{"airframexr":1,"view":{"left":[outer,inner,upper,lower],"right":[...]},"sharpen":true}
+```
+
+The app declares that box to the compositor as it is, clamped to the compositor's circumscribed frustum, and re-declares it whenever it
+changes. With no message (an older streamer) the app declares the compositor's whole frustum, as the stock app does. The message and the
+box are per connection and reset on every disconnect. The message is carried by a patch to the ALVR client core
+(`patches/client_core-reserved-message.patch`). Design and measurements: `docs/FOV_CONTRACT_PLAN.md` in the AirFrameXR repository.
+
+## Recentering
+
+`WorldTracker.recenterOnHead()` makes the head's floor position and heading the stream's origin by setting the transform that every pose
+already goes through (head, controllers, hands), so nothing else changes. It runs on the Create + Options chord
+(`updateRecenterChord`, edge triggered, both menu buttons down) and, if the setting is on, about 90 poses after a stream starts.
+The streamer is told through the playspace message. visionOS's own recenter (long Crown press) changes the origin underneath; the
+old triple-press detection only runs with `keepSteamVRCenter`, which nothing in the app sets.
+
+## Staying alive
+
+- **Headset off**: the app holds the connection up to 30 minutes (`backgroundHoldMax`), drops decoded video, keeps sending fake tracking so
+  the streamer does not see the headset vanish, and leaves the audio session on (`UIBackgroundModes: audio`). On return the decoder is
+  rebuilt from the saved parameter sets with a keyframe, and the immersive space is opened again if it has not rendered after 2 s.
+- **Lost link**: the scene stays and the stream resumes by itself. After 60 s without a stream the app leaves for the window;
+  Auto-connect enters again when the PC is found.
+- **Locks**: the decoder, the frame queue and the last shown frame are guarded by one lock; client core statistics are sent outside its
+  mutex (`patches/client_core-statistics-send-outside-lock.patch`). Found with ThreadSanitizer in the protocol harness.
+
+## Testing
+
+- **Protocol harness** (`tools/protocol-harness/`): runs the app's own `EventHandler.swift` on Linux (Swift for Linux, no Mac) against a
+  scripted streamer: stalls, decoder rebuilds, background reports, restarts, ThreadSanitizer. It does not cover Metal, the real
+  VideoToolbox or the visionOS watchdog.
+- **Steam Controller harness** (`tools/steam-controller-harness/`).
+- Everything else is tested on a headset; `docs/CHANGELOG.md` says what was and was not.
+
+## Building and shipping
+
+- GitHub Actions on an Xcode 27 runner (`.github/workflows/`): an unsigned check that needs no account, and a TestFlight workflow that
+  archives, signs with an App Store Connect API key and uploads. The build number is the run number. No Mac is needed. Set-up guide:
+  `docs/TESTFLIGHT.md`; App Store submission: `docs/APPSTORE.md`.
+- The client core (Rust) is built with cargo and cbindgen, then the xcframework and `xcodebuild`; the CI files show the exact commands.
+  Patches to the ALVR submodule are applied by `scripts/apply_core_patches.sh`.
 - Export compliance is declared in `Info.plist` (the stream is unencrypted by design).
 
-## Building
+---
 
-Same as upstream: see the [Building](https://github.com/alvr-org/alvr-visionos/wiki/Building) wiki page. The CI
-workflow files show the exact commands (Rust client core, cbindgen, `repack_alvr_client.sh`, then `xcodebuild`).
+# Part 3: Credits
 
-## 1.4.0
+- **[ALVR for Apple visionOS](https://github.com/alvr-org/alvr-visionos)**, which this app is a fork of, written by
+  **[Max Thomas (shinyquagsire23)](https://github.com/shinyquagsire23)** and the alvr-org contributors, among them panthurrr, zhuowei,
+  shadowfacts, dereklucas, sidd, jfenton, svrc and robbiet480. The renderer, the tracking, the client core integration, the controller
+  and hand input, the chroma key and the TestFlight-ready project are theirs.
+- **[ALVR](https://github.com/alvr-org/ALVR)**: the streaming protocol and the client core.
+- **AMD**: the contrast adaptive sharpening is AMD's **FidelityFX Contrast Adaptive Sharpening (CAS)**, published through GPUOpen under the
+  MIT licence, adapted to Metal. Copyright Advanced Micro Devices, Inc.
+- **AirFrameXR** (PC side, frame generation, foveation, the FoV contract) and the changes in this fork: Jean-Francois Bobier.
 
-Built in CI and sent to TestFlight; **not tried on a headset**, and nothing of it was compiled locally (no Xcode on the dev machine).
+# License
 
-- **The streamer owns the field of view.** The H / V FoV sliders and the Default FoV switch are gone. The streamer sends one box per
-  connection (over `ServerControlPacket::Reserved`, a client_core patch) and the app declares it as it is, clamped to the compositor's
-  circumscribed frustum. With no message (an older streamer) the app declares the compositor's whole frustum, as before. Design:
-  `docs/FOV_CONTRACT_PLAN.md` in the AirFrameXR repository.
-- **Sharpening on the magnified luma (AMD FidelityFX CAS, MIT).** A single-pass "sharpen and scale" form of contrast adaptive sharpening on the
-  luma plane only, for the 1.2 to 1.7 x magnification at the centre of the view. Off unless the streamer switches it on in the same
-  message; the Catmull-Rom reconstruction of 1.3.8 stays the default.
-- **Auto-recenter on stream start** (switch, off by default, `autoRecenterOnStart`): about 90 poses after a stream starts, the head's floor
-  position and heading become the stream's origin.
-- **Recenter = Create + Options** on the PSVR2 Sense controllers: pressing both at once recenters the same way (`recenterOnHead`).
-  While the other button is down a press is not sent to the game, so Create does not pause UEVR games. Only the yaw and the floor position
-  change; a long Digital Crown press (visionOS's own recenter) is separate. The old triple-press detection only runs with
-  `keepSteamVRCenter`, which nothing in the app sets.
-- **Flat2VR mode for PSVR2 buttons** (switch, on by default, `flat2vrButtons`): Flat2VR games assume an Xbox controller (Create = View,
-  Options = Menu). **The setting is stored but not wired**: the Quest 2 emulation the stream uses has no View button, so the mapping
-  needs a streamer-side gamepad profile or a decision on which Touch inputs to reuse.
-- **Audio keep-alive ("Stream audio when headset removed")** (switch, on by default, `streamAudioWhenHeadsetOff`, from 1.3.11). Take the
-  headset off with a stream up and the connection stays: the game keeps running and its audio keeps playing, no picture is decoded
-  while the headset is off, and the picture comes back when it is put on again (the decoder is rebuilt from the saved parameter sets with a
-  keyframe, and the immersive space is opened again if it has not rendered 2 s after). The app is kept alive in the background for up to
-  30 min (`backgroundHoldMax`, a bound, not a setting) with `UIBackgroundModes: audio`, the audio session left on and fake tracking sent so
-  the streamer does not see the headset vanish; after that, or with the switch off, the app leaves as it did before 1.3.11.
-  Not tried on a headset for the full time: what is still unknown is how long visionOS lets the app run in the background and whether the
-  headset plays the audio while not worn. The `[stream] ...background...` lines in the streamer log show what happened.
-- **Entry window**: Auto-connect card, version line, connection dot (above).
-- Video after a headset-off hold: a frame VideoToolbox refuses counts as a failed decode, the decoder is rebuilt from the saved parameter
-  sets after a hold, and the immersive space is opened again if it has not rendered 2 s after the headset is back.
-
-## 1.3.11
-
-Headset off keeps the stream (the user takes the headset off to open the door, the game audio goes on, the picture is back when it is
-put on again). **Not tried on a headset**: checked in the protocol harness on Linux and compiled there only; the App Store build is
-under review, so nothing of this was pushed or built in CI.
-
-- **A switch "Stream audio when headset removed"** on the Entry window, on by default (`streamAudioWhenHeadsetOff`); off = the app leaves in the
-  background as before. The version line under the logo and the "Streamer Version" row are gone from the Entry window (not useful to users).
-- **`UIBackgroundModes: audio`** in `Info.plist` (the app does play the game's audio) so visionOS does not suspend it at once.
-- **With a stream up, the background no longer ends the app.** `EventHandler.exitIfBackgrounded` holds the connection for up to
-  30 min (`backgroundHoldMax`, a bound, not a setting): no picture is decoded (`handleNals` drops it), the fake-tracking keep-alive
-  runs like before the space opened, and the audio session is left on. Without a stream, or after the bound, the app exits as before.
-- **A layer that ends with the headset off** (`MetalClientSystem.renderLoop`) no longer calls `alvr_pause()`; the app re-enters the
-  immersive space by itself when it is back (`onResumeStream`), asks for a keyframe, and the stream never stopped.
-- What is unknown until measured on a headset: how long visionOS lets the app run in the background, whether the headset plays audio
-  while not worn, and whether the layer is paused or invalidated when it comes off (the logs `[stream] ...background...` show it).
-
-## 1.3.10
-
-Hardening against a lost or stalled link (AirFrameXR `docs/VISIONOS_CLIENT_HARDENING.md`). Checked in the protocol harness on Linux and,
-for the client_core patch, on the streamer's lab with the mock headset; not yet on a headset. No change to pacing or picture.
-
-- **A lost link no longer leaves a frozen scene.** The client stays in the immersive space and the stream resumes by itself when the
-  streamer is back; after 60 s without a stream (`EventHandler.leaveStreamAfter`) it leaves the space for the Entry window, and
-  auto-connect re-enters when the streamer is found again.
-- **Shorter lock holds between the render thread, the decoder callback and client_core.** `alvr_report_frame_decoded` is called outside
-  `frameQueueLock`, and client_core sends its statistics packet after releasing its statistics mutex
-  (`patches/client_core-statistics-send-outside-lock.patch`, applied to the ALVR submodule by `scripts/apply_core_patches.sh` at build time).
-- **Metal giving no command buffer skips the frame** instead of ending the app.
-
-## 1.3.9
-
-Pacing, measured on an M2 Vision Pro on 2026-11-10 (pacing test rig, then a TestFlight A/B on the headset). The picture work of 1.3.8 is unchanged.
-
-- **The pick waits 8 ms for a late frame** (stock 5 ms): +1.1 points of new frames per tick, repeated ticks down by 29%, about 0.5 ms
-  more queue age, a deadline-miss count that stays about 1 per 1000. `Renderer.swift`, the `pollFrameForDisplay` call.
-- **100 Hz hack.** When the streamer asks for 90 Hz the client asks visionOS for 100 Hz (`VideoHandler.applyRefreshRate`), on every
-  Vision Pro including the M5 so there is one rule. It is a request visionOS may refuse. The reason: the 100 Hz mode missed about 3 frames
-  per 1000, a real 90 Hz stay about 23, and the headset ran 100 Hz in the sessions measured even when 90 was asked. The stream rate stays
-  the negotiated one. If a later visionOS makes 90 Hz fine, delete the two lines of `displayRequest`.
-- The telemetry added for 1.3.8 and the pose-fetch experiments (the `[tele]` lines in the streamer log) is removed; the catch-up pick stays as a lab switch (`EventHandler.catchUpPick`, off)
-  because the protocol harness drives it.
-
-## 1.3.8
-
-Picture quality: two changes in the shader and the texture path, no setting for either.
-
-- **Bicubic chroma.** The two colour planes of the 4:2:0 picture are half the luma resolution, so they are always enlarged.
-  They are now sampled with a Catmull-Rom filter (`sampleCatmullRom5` in `Shaders.metal`: five bilinear taps with the weights
-  renormalised, so the cost is five texture reads instead of the full sixteen). It passes exactly through the stored values, so
-  flat colour and 1:1 areas do not change; colour fringes on edges (red on dark, text on a coloured background) are tighter.
-- **Bicubic luma where the picture is stretched.** The same filter is used for brightness only where one stored texel covers
-  more than about one screen pixel (decided per pixel from the sampling footprint): the foveated periphery, or a stream
-  encoded below the screen's resolution. Elsewhere the plain bilinear sample is kept, so the centre costs nothing extra.
-- **Own colour conversion.** To choose the filter, the video is read as two plain planes (`r8`/`rg8`, `r16`/`rg16` for 10-bit) and
-  converted with the YCbCr matrix of the stream's encoding, instead of Apple's private converting formats, which filter the
-  colour inside the sample where the shader cannot reach. The colour was checked on a Vision Pro by the owner (the first
-  build with the filters: colours and sharpness good). `forceFastSecretTextureFormats` in `VideoHandler.swift` goes back to the old formats
-  with one constant, filters and all.
-- **Cost, measured on the device** (lines `[tele] draw over ...` in the streamer's `alvr.log`): the GPU draw takes about
-  4.0 ms per frame at 100 Hz (2.2 ms with the hardware formats and no filters, on a different, larger stream, so the two
-  numbers are not a clean comparison; the filter's share is at most the difference and is largest on a small stream). In
-  196,388 frames, 4 command buffers finished after their presentation time; the GPU is not what misses a frame.
-- Not in the client on purpose: sharpening (contrast adaptive or otherwise) alters the image and is done on the streamer.
-
-Not picture: the frame pick shows the newer of two queued frames after a stall (less lag after a refresh-rate switch), the
-client's refresh rate follows the rate the stream negotiates, and the `[tele]` lines in `alvr.log` (display interval, draw
-cost, pick, CPU split) that these were measured with. See `docs/VISIONOS_TELEMETRY_LEARNINGS.md` in the AirFrameXR repository.
-
-## 1.3.6
-
-- Aligned with the AirFrameXR 1.3.6 PC package; this is the first build that carries everything below. `airframexr-client` is the
-  release branch (the 1.4 line is retired: no streamer-driven view, the app keeps the FoV Scale slider).
-- The encoding gamma the app asks the streamer for is now **1.2** (was 1.5), the value reported as the best for the Vision Pro; the app decodes with whatever the streamer negotiates, so a streamer that overrides it still wins. (Was committed after TestFlight build 1.3.5.)
-- The **FoV Scale** slider (below, from 1.3.5) is in this build, as **two sliders**, Horizontal and Vertical (0.6 to 1.4, centred on 1.0) behind a **Default FoV** switch (on by default; turning it on resets both to 1.0). A setting saved by an earlier build
-  is carried to both, with the switch off. Above 1.0 the app declares more angle than the compositor's frustum (1.3.5 capped at 1.0 after the old 1.1 did that): untested on a headset.
-- The Performance HUD (left forearm) and the frame timing it needed are removed.
-- The height rows are one line: `HMD 1.62 m + offset +5 cm = 1.67 m`. The Enter button has more room.
-
-## 1.3.5
-
-- The **FoV Scale** slider is back (0.70 to 1.00, 0.05 steps, 1.00 = the compositor's whole frustum), on top of the declared
-  frustum: a user who likes a tighter, sharper stream can pick it without any calibration; the PC-side restriction is a
-  separate control (it only changes what the game renders). The slider never goes above Apple's frustum (the 1.1 of the
-  old build asked for more angle than the headset has).
-- The temporary `[ratemap]` probe of 1.3.2 is removed: no diagnostic lines are written into the streamer's log any more.
-- Version aligned with the AirFrameXR 1.3.5 PC package.
-
-## 1.3.2 (not built yet)
-
-- The fixed field-of-view ceiling is gone: the app declares the compositor's own frustum, as the stock app does at
-  FoV Scale 1. A tester saw black bars with the streamer's restriction off on 1.3.1 and none on the stock app: the
-  ceiling, measured on two wearers, was smaller than his view. Cost: the stream spreads over about twice the area
-  (left eye 1.79 / 1.02 / 1.22 / 1.02 against about 1.05 / 0.80 / 0.76 / 0.87), so about 1.4 times fewer pixels per
-  degree per axis, the stock app's sharpness. A calibrated wearer still gets the game restricted to the rectangle
-  (the streamer converts the absolute tangents against the new box); the sharpness comes back only when the
-  streamer can tell the app which box to declare (Next).
-- (Removed in 1.3.5) TEMPORARY `[ratemap]` lines in the streamer's log, the compositor's rasterization rate map sampled
-  across each eye.
-
-## 1.3.1 (2026-11-02)
-
-Stream transitions: the app going unstable, or closing itself, when the stream starts, when a game stalls or loads, or when the frame
-rate drops. Found with a new protocol harness (`tools/protocol-harness/`, below) that runs the app's own `EventHandler.swift` on Linux
-against a scripted streamer, plus ThreadSanitizer. TestFlight build 21 (the transition fixes, before the hand input below was
-removed): testers report no transition errors any more (2026-11-02).
-
-- All hand input is removed: the system pinch gesture (and the double pinch that sent A / X), hands as controllers, the hand skeleton, the
-  "Hands as controllers" switch and the controllers-clack toggle. Users reported random commands from the pinch. ARKit hand tracking
-  still runs, only to fuse the Steam Controller pose from the hands holding it. Without a controller, a Steam Controller or a gamepad the
-  app now sends no input at all (so the desktop mirror cannot be clicked either). Settings saved by earlier builds are ignored.
-
-- A game that sends nothing for 30 s (a long loading screen) no longer makes the app drop the connection. It reconnects only when
-  frames arrive and none decode for 30 s.
-- A new decoder when the streamer's stream configuration changes on the same connection (AirFrameXR does this when a game exits after
-  a deferred stream change). The old decoder was kept and the picture froze until the app was restarted. A decoder that shows no
-  picture for a second of frames is also rebuilt.
-- The app no longer closes on a short "background" report from visionOS: it leaves once the background state has held for one second.
-- The decoder, the frame queue and the last shown frame are shared by the network, render and event threads. They are now read and
-  written under one lock, so a stream stop or restart cannot swap them under a thread that is using them. These were ThreadSanitizer
-  findings and crash candidates at every transition.
-- Smaller fixes:
-  - A tracking worker that could wait forever after startup.
-  - Render pipeline rebuilds run one at a time (several used to run at once at every stream start).
-  - A frame finished after its presentation time reports no queue time, instead of a wrapped value that held head prediction at its
-    cap.
-- Transitions write `[stream]` lines into the streamer's log: decoder rebuilds, the reconnect rule, background exits. If the app
-  still closes, look there first.
-
-Not covered by the harness: Metal, the real VideoToolbox and the visionOS watchdog. Its streamer answers an IDR request instantly,
-so its recovery times are best cases.
-
-**Protocol harness:** `tools/protocol-harness/build.sh [--tsan]` then `run.sh [--tsan]` (Swift for Linux, no Mac). In the AirFrameXR
-repository, `python3 harness/stability/run_stability.py client [--tsan]` runs the same thing. Before / after on the same 15
-scenarios:
-
-| Scenario | 1.2.2 | 1.3.1 |
-|---|---|---|
-| 35 s stall | the app drops the connection | passes |
-| encoder rebuilt mid-connection | picture frozen | passes |
-| 0.3 s background report | the app closes | passes |
-| idle to game, fps drops, 1 / 6 s stalls, choking game, irregular cadence, restarts | pass | pass |
-| ThreadSanitizer | races on the decoder and the last shown frame | only simple counters and timers left |
-
-## 1.2.2 (2026-10-31)
-
-- Finger pinches are ignored while a regular gamepad (DualSense, Xbox, Joy-Con) is connected. A pinch caught by accident used to take
-  the trigger and pointer from the gamepad for a few seconds (user report). Tracked PS VR2 Sense controllers are not affected (they are
-  handled per hand). Built by CI only; not tested on a headset. Any connected gamepad switches pinches off, used or idle.
-
-## 1.2.1 (2026-10-30)
-
-- The ring outside the declared frame follows the picture's own edge when a chroma key is on: opaque black where the edge is picture (a
-  game), transparent where it is the key colour (between games, around the desktop mirror), so the idle passthrough is no longer framed
-  in black. Drawn as four thin strips around the frame (no overdraw of the picture), one texture sample per pixel, only while a key is on;
-  decided on the GPU from the decoded frame, so it changes on the same frame as the picture. Not measured on a headset yet (GPU time
-  with and without the ring is the check owed).
-
-## 1.2.0 (2026-10-29)
-
-Released together with AirFrameXR streamer 1.2.0; the two are numbered together from now on. TestFlight builds 17
-and 18 (version 1.2.0) carry everything below except the double tap, which is committed and not yet built.
-
-- The declared field of view is a ceiling, the calibration lives on the PC (above). A second wearer who needed
-  0.80 at the bottom could not get it before: the old fixed box stopped at 0.77.
-- The hand click is the system pinch gesture (above). Found with a `[pinch]` debug line the calibration builds
-  wrote every 2 s into the streamer's log: the hand was untracked 70 % of the time with the hand at the side, and
-  the skeleton distance read 1.4 to 2.5 cm on real pinches against a 2 cm threshold.
-- Black outside the frame whatever the chroma key, and the chroma key itself working again with it (the first
-  attempt cleared to opaque black and discarded keyed pixels, which left that black in place; keyed pixels are
-  now written transparent).
-- Two pinches in a row send A / X: a double click on the desktop mirror. Not built or tried on a device yet.
-- TestFlight workflow: the certificate revoke step; default version 1.2.0.
-
-Not done, by choice: the pinch keeps Apple's recognizer timing (a deliberate pinch, no quick flick); nothing
-calibration-related is set on the headset.
-
-## Next
-
-- The wearer's rectangle declared by the client itself, on the streamer's order (a host-to-client message on the
-  v20 protocol's reserved packet): the stream frame could then cover only the rectangle, which the AirFrameXR
-  measurements put at 30 % fewer encoded pixels on a full-frame stream. Until then the ceiling is what the stream
-  covers.
-- The field-of-view sweep drawn by the client itself, with the pinch read from hand tracking, if the streamed
-  sweep (`tools/fov_calibration_bundle` in the AirFrameXR repository) proves too dependent on the hand staying in
-  the cameras' view.
+MIT. Copyright (c) 2026 Jean-Francois Bobier, for the changes and additions in this fork; copyright (c) 2024 alvr-org for the code it is
+based on. Both notices are kept in `LICENSE`, as the MIT licence requires. The AMD FidelityFX CAS code keeps its own MIT notice (AMD).
