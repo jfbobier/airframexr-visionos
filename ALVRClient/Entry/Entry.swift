@@ -31,6 +31,44 @@ struct Entry: View {
         return String(format: "HMD %.2f m + offset %+d cm = %.2f m", head, offset, head + Float(offset) / 100.0)
     }
 
+    private var statusColor: Color {
+        switch eventHandler.connectionState {
+        case .connected: return .green
+        case .connecting: return .orange
+        case .disconnected: return .secondary
+        }
+    }
+
+    private var autoConnectCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Toggle(isOn: $gStore.settings.autoConnect) {
+                HStack(spacing: 14) {
+                    Image(systemName: "bolt.fill")
+                        .font(.title2)
+                        .foregroundStyle(gStore.settings.autoConnect ? Color.green : Color.secondary)
+                    Text("Auto-connect")
+                        .font(.title3.weight(.semibold))
+                }
+            }
+            .toggleStyle(.switch)
+            .onChange(of: gStore.settings.autoConnect) {
+                saveAction()
+            }
+
+        }
+        .padding(18)
+        .background(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(gStore.settings.autoConnect ? Color.green.opacity(0.15) : Color.white.opacity(0.06))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(gStore.settings.autoConnect ? Color.green.opacity(0.7) : Color.white.opacity(0.15), lineWidth: 1.5)
+        )
+        .padding(.horizontal)
+        .padding(.top)
+    }
+
     var body: some View {
         VStack(spacing: 20) {
         VStack {
@@ -42,13 +80,21 @@ struct Entry: View {
                 .frame(maxWidth: .infinity, maxHeight: 150)
                 .padding(.top)
 
-                VStack {
+                // Stamped by the TestFlight workflow (marketing_version), so it follows the build.
+                Text(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+
+                HStack(spacing: 8) {
+                    Circle().fill(statusColor).frame(width: 10, height: 10)
                     Text(eventHandler.connectionFlavorText)
                         .font(.system(size: 15))
                 }
                 .frame( maxWidth: .infinity, minHeight: 50, maxHeight: 50, alignment: .top)
             }
             .frame(minHeight: 200)
+
+            autoConnectCard
 
             VStack {
                 Text(heightLine)
@@ -74,13 +120,6 @@ struct Entry: View {
             .padding(.horizontal)
             .padding(.top)
 
-            // 1.4: the field of view and the picture are set in the streamer on the PC (the H / V FoV sliders are gone)
-            Text("Field of view and picture: set in the streamer on the PC")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal)
-                .padding(.top)
-
             VStack {
                 Toggle(isOn: Binding(
                     get: { gStore.settings.chaperoneDistanceCm > 0 },
@@ -89,13 +128,6 @@ struct Entry: View {
                     Text("Proximity chaperone")
                 }
                 .toggleStyle(.switch)
-                Toggle(isOn: $gStore.settings.autoConnect) {
-                    Text("Auto-connect")
-                }
-                .toggleStyle(.switch)
-                .onChange(of: gStore.settings.autoConnect) {
-                    saveAction()
-                }
                 Toggle(isOn: $gStore.settings.streamAudioWhenHeadsetOff) {
                     Text("Stream audio when headset removed")
                 }
@@ -104,6 +136,25 @@ struct Entry: View {
                     EventHandler.shared.holdStreamWhenHeadsetOff = gStore.settings.streamAudioWhenHeadsetOff
                     saveAction()
                 }
+                Toggle(isOn: $gStore.settings.autoRecenterOnStart) {
+                    Text("Auto-recenter on stream start")
+                }
+                .toggleStyle(.switch)
+                .onChange(of: gStore.settings.autoRecenterOnStart) {
+                    saveAction()
+                }
+                Toggle(isOn: $gStore.settings.flat2vrButtons) {
+                    Text("Flat2VR mode for PSVR2 buttons")
+                }
+                .toggleStyle(.switch)
+                .onChange(of: gStore.settings.flat2vrButtons) {
+                    saveAction()
+                }
+                Label("Recenter = Create + Options", systemImage: "gamecontroller")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 8)
             }
             .padding(.horizontal)
             .padding(.top)

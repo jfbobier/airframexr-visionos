@@ -275,6 +275,10 @@ class WorldTracker {
     var lastUpdatedTs: TimeInterval = 0
     var crownPressCount = 0
     var sentPoses = 0
+    /// Create (left) and Options (right) on the PSVR2 Sense controllers, as last seen; both down = recenter.
+    var psMenuHeldLeft = false
+    var psMenuHeldRight = false
+    var recenterChordLatched = false
     var debuggableMats: [simd_float4x4] = []
     var debuggableScales: [Float] = []
     /// Solid geometry to draw as wireframe, alongside the basis gadgets.
@@ -484,6 +488,36 @@ class WorldTracker {
         }
     }
     
+    /// Makes the head's current position (on the floor) and heading the stream's origin: the transform every pose
+    /// already goes through (head, hands, controllers), so nothing else changes. Yaw only, the floor stays the floor.
+    func recenterOnHead() {
+        let m = currentAppleOriginFromAnchor
+        let back = simd_float3(m.columns.2.x, 0, m.columns.2.z)
+        let yaw: Float
+        if simd_length(back) > 0.1 {
+            yaw = atan2(back.x, back.z)   // heading of -z (the way the head looks) projected on the floor
+        } else {
+            // looking straight up or down: take the heading from the head's right axis instead
+            yaw = atan2(-m.columns.0.z, m.columns.0.x)
+        }
+        var t = simd_float4x4(simd_quatf(angle: yaw, axis: simd_float3(0, 1, 0)))
+        t.columns.3 = simd_float4(m.columns.3.x, 0, m.columns.3.z, 1)
+        worldTrackingSteamVRTransform = t
+        needsRecenterTrigger = true
+        print("Recentered on the head, yaw", yaw)
+    }
+
+    /// Create + Options pressed together recenter. One call per pair of presses.
+    func updateRecenterChord() {
+        let both = psMenuHeldLeft && psMenuHeldRight
+        if both && !recenterChordLatched {
+            recenterChordLatched = true
+            recenterOnHead()
+        } else if !psMenuHeldLeft && !psMenuHeldRight {
+            recenterChordLatched = false
+        }
+    }
+
     func resetPlayspace() {
         print("Reset playspace")
         // Reset playspace state
@@ -1876,8 +1910,14 @@ class WorldTracker {
                         // Workaround until Apple supports trigger sensors
                         alvr_send_button(WorldTracker.leftTriggerSensorValue, scalarVal((buttons["Trigger"]?.touchedInput?.isTouched ?? false) ? 1.0 : 0.0))
 
-                        let menuPressed = buttons["Button Menu"]?.pressedInput.isPressed ?? false
+                        let menuPressedRaw = buttons["Button Menu"]?.pressedInput.isPressed ?? false
                         let menuTouched = buttons["Button Menu"]?.touchedInput?.isTouched ?? false
+                        // Create + Options together recenter (see updateRecenterChord). While the other one is
+                        // down this press is part of that chord and is not sent to the game (Create is the pause
+                        // button in UEVR games); the very first press of a chord that starts here still goes out.
+                        WorldTracker.shared.psMenuHeldLeft = menuPressedRaw
+                        WorldTracker.shared.updateRecenterChord()
+                        let menuPressed = menuPressedRaw && !WorldTracker.shared.psMenuHeldRight && !WorldTracker.shared.recenterChordLatched
                         // A PS press that reaches the app is the game's menu button as well as the system click:
                         // AirFrameXR has no dashboard, so a bare system click would do nothing a player can see.
                         alvr_send_button(WorldTracker.leftMenuTouched, boolVal(menuTouched || homeTouched))
@@ -1911,8 +1951,14 @@ class WorldTracker {
                         // Workaround until Apple supports trigger sensors
                         alvr_send_button(WorldTracker.rightTriggerSensorValue, scalarVal(((buttons["Trigger"]?.touchedInput?.isTouched ?? false) ? 1.0 : 0.0)))
 
-                        let menuPressed = buttons["Button Menu"]?.pressedInput.isPressed ?? false
+                        let menuPressedRaw = buttons["Button Menu"]?.pressedInput.isPressed ?? false
                         let menuTouched = buttons["Button Menu"]?.touchedInput?.isTouched ?? false
+                        // Create + Options together recenter (see updateRecenterChord). While the other one is
+                        // down this press is part of that chord and is not sent to the game (Create is the pause
+                        // button in UEVR games); the very first press of a chord that starts here still goes out.
+                        WorldTracker.shared.psMenuHeldRight = menuPressedRaw
+                        WorldTracker.shared.updateRecenterChord()
+                        let menuPressed = menuPressedRaw && !WorldTracker.shared.psMenuHeldLeft && !WorldTracker.shared.recenterChordLatched
                         // A PS press that reaches the app is the game's menu button as well as the system click:
                         // AirFrameXR has no dashboard, so a bare system click would do nothing a player can see.
                         alvr_send_button(WorldTracker.rightMenuTouched, boolVal(menuTouched || homeTouched))
@@ -2260,6 +2306,10 @@ class WorldTracker {
             print("anchor finalized")
         }
         sentPoses += 1
+        // Auto-recenter: a moment after the stream starts, once the head pose is settled.
+        if sentPoses == 90 && ALVRClientApp.gStore.settings.autoRecenterOnStart {
+            recenterOnHead()
+        }
         
         //let targetTimestampNS = UInt64(targetTimestampWalkedBack * Double(NSEC_PER_SEC))
         let reportedTargetTimestampNS = UInt64(reportedTargetTimestamp * Double(NSEC_PER_SEC))

@@ -26,6 +26,11 @@ struct GlobalSettings: Codable {
     var heightOffsetCm: Int = 0
     /// Enter the streamer as soon as the connection is up, without pressing Enter.
     var autoConnect: Bool = false
+    /// Recenter on the head's position and heading a moment after every stream start.
+    var autoRecenterOnStart: Bool = false
+    /// Flat2VR games assume an Xbox controller: Create = View, Options = Menu on the PSVR2 Sense controllers.
+    /// Stored only for now: the button mapping behind it is not wired yet.
+    var flat2vrButtons: Bool = true
     /// Headset off with a stream up: keep the connection and the game audio going (no picture) and come back when it is put on again.
     var streamAudioWhenHeadsetOff: Bool = true
     /// FoV scale per axis (0.6 to 1.4) on the field of view declared to the streamer; 1.0 = the compositor's whole frustum.
@@ -61,6 +66,8 @@ struct GlobalSettings: Codable {
         self.dismissWindowOnEnter = try container.decodeIfPresent(Bool.self, forKey: .dismissWindowOnEnter) ?? self.dismissWindowOnEnter
         self.heightOffsetCm = try container.decodeIfPresent(Int.self, forKey: .heightOffsetCm) ?? self.heightOffsetCm
         self.autoConnect = try container.decodeIfPresent(Bool.self, forKey: .autoConnect) ?? self.autoConnect
+        self.flat2vrButtons = try container.decodeIfPresent(Bool.self, forKey: .flat2vrButtons) ?? self.flat2vrButtons
+        self.autoRecenterOnStart = try container.decodeIfPresent(Bool.self, forKey: .autoRecenterOnStart) ?? self.autoRecenterOnStart
         self.streamAudioWhenHeadsetOff = try container.decodeIfPresent(Bool.self, forKey: .streamAudioWhenHeadsetOff) ?? self.streamAudioWhenHeadsetOff
         // Before 1.3.6 one uniform factor (fovRenderScale) covered both axes: it becomes both, so nothing changes for existing installs.
         let legacyFovScale = try decoder.container(keyedBy: LegacyKeys.self).decodeIfPresent(Float.self, forKey: .fovRenderScale) ?? 1.0
