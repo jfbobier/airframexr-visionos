@@ -4,8 +4,7 @@ The visionOS client of [AirFrameXR](https://github.com/jfbobier/AirFrameXR): wir
 the game through AirFrameXR's OpenXR runtime (frame generation, foveated encoding, NVENC) and streams it with the ALVR v20
 protocol. This app shows the stream on the Vision Pro and sends back head tracking and controller input.
 
-Version 1.4.0 (numbered with the AirFrameXR streamer it pairs with). It is a finished app that works: it is on TestFlight and used for
-daily play. The version history, with what was measured on a headset, is in [docs/CHANGELOG.md](docs/CHANGELOG.md).
+Version 1.4.0 (numbered with the AirFrameXR streamer it pairs with). The version history is in [docs/CHANGELOG.md](docs/CHANGELOG.md).
 
 ---
 
