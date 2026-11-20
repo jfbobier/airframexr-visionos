@@ -2,6 +2,16 @@
 
 Moved out of the README on 2026-11-20. Newest first. Each entry says what was tried on a headset and what was not.
 
+## 1.4.1 (foundation test build)
+
+Built in CI for TestFlight; **not tried on a headset**, nothing compiled locally (no Xcode on the dev machine).
+
+- **No stand-in views.** Before its immersive space rendered (and while the headset was off) the app sent fake view parameters with its fake
+  tracking: Apple's raw frustum with both eyes at one point. A game started in that window took them as the headset's view (Star Wars Galactic
+  Racer, 2026-11-20: 1950 x 1804 per eye instead of 2624 x 2368, most likely no stereo). The app now sends only the fake tracking; it declares
+  its view once its renderer has the real one. Pairs with the AirFrameXR streamer (which needs no views to stream, and gives a game that starts
+  early the box it sent the app); a stock ALVR streamer is not a target of this build.
+
 ## 1.4.0
 
 Built in CI and sent to TestFlight; **not tried on a headset**, and nothing of it was compiled locally (no Xcode on the dev machine).

@@ -2753,8 +2753,11 @@ class WorldTracker {
         alvr_send_view_params(UnsafePointer(viewFovsPtr))
     }
     
-    // We want video frames ASAP, so we send a fake view pose/FOVs to keep the frames coming
-    // until we have access to real values
+    // We want video frames ASAP, so we send fake tracking to keep the frames coming until we have access to real values (before the immersive
+    // space renders, and while the headset is off). AirFrameXR 1.4-foundation: no fake view params any more. They declared Apple's raw frustum with
+    // both eyes at one point, which a game started in that window took as the headset's view (SWGR, 2026-11-20: a smaller render and no stereo);
+    // the real views are declared by the renderer once it has them, and the AirFrameXR streamer needs nothing before that (frames do not wait for
+    // views; a game that starts early gets the box sent to the app or the last real views). A stock ALVR streamer is not a target.
     func sendFakeTracking(viewFovs: [AlvrFov], targetTimestamp: Double) {
         // Shouldn't happen
         if viewFovs.isEmpty {
@@ -2763,21 +2766,14 @@ class WorldTracker {
         
         var trackingMotions:[AlvrDeviceMotion] = []
         
-        let dummyPoseView = AlvrPose()
         let dummyPoseHeadset = AlvrPose(orientation: AlvrQuat(simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)), position: (0.0, 1.2, 0.0)) // keep the dummy at a reasonable height for both seated/standing entry
         let targetTimestampNS = UInt64(targetTimestamp * Double(NSEC_PER_SEC))
-        
-        let viewFovsPtr = UnsafeMutablePointer<AlvrViewParams>.allocate(capacity: 2)
-        defer { viewFovsPtr.deallocate() }
-        viewFovsPtr[0] = AlvrViewParams(pose: dummyPoseView, fov: viewFovs[0])
-        viewFovsPtr[1] = AlvrViewParams(pose: dummyPoseView, fov: viewFovs[1])
         
         let headLinVel: (Float, Float, Float) = (0,0,0)
         let headAngVel: (Float, Float, Float) = (0,0,0)
         let headMotion = AlvrDeviceMotion(device_id: WorldTracker.deviceIdHead, pose: dummyPoseHeadset, linear_velocity: headLinVel, angular_velocity: headAngVel)
         trackingMotions.append(headMotion)
         
-        alvr_send_view_params(UnsafePointer(viewFovsPtr))
         alvr_send_tracking(targetTimestampNS, trackingMotions, UInt64(trackingMotions.count), nil, nil)
         
         print("Sending fake tracking...")
